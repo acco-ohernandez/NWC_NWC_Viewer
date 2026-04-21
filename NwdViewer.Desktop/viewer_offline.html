@@ -1,0 +1,768 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Offline 3D Viewer</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: Segoe UI, sans-serif; font-size: 12px; }
+    #app { display: grid; grid-template-columns: 260px 5px 1fr; height: 100%; }
+    #resizer { cursor: ew-resize; background: #e4e4e4; transition: background 80ms; user-select: none; }
+    #resizer:hover, #resizer.dragging { background: #7ab3ff; }
+    #app.collapsed #resizer { display: none; }
+    #app.collapsed { grid-template-columns: 28px 1fr; }
+
+    #tree-panel { display: flex; flex-direction: column; border-right: 1px solid #ccc; background: #fafafa; overflow: hidden; }
+    #tree-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #eaeaea;
+                   border-bottom: 1px solid #ccc; font-weight: 600; }
+    #tree-collapse { border: none; background: transparent; cursor: pointer; font-size: 12px; padding: 2px 6px; }
+    #tree-search { margin: 6px 8px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 3px; }
+    #tree-body { flex: 1; overflow-y: auto; padding: 4px 0; position: relative; }
+    #tree-actions { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid #ccc; background: #f0f0f0; }
+    #tree-actions button { flex: 1; padding: 4px 2px; font-size: 11px; cursor: pointer; border: 1px solid #bbb;
+                           border-radius: 3px; background: #fff; }
+    #tree-actions button:hover { background: #e8e8e8; }
+    #tree-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #tree-status { padding: 4px 8px; font-size: 11px; color: #888; border-top: 1px solid #ddd; background: #fafafa; }
+
+    .tree-node { display: flex; align-items: center; padding: 1px 4px 1px 0; cursor: pointer; white-space: nowrap; user-select: none; }
+    .tree-node:hover { background: #e0efff; }
+    .tree-node.selected { background: #cce4ff; }
+    .tree-node input[type=checkbox] { margin: 0 4px 0 0; }
+    .tree-toggle { display: inline-block; width: 14px; text-align: center; cursor: pointer; color: #666; }
+    .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .tree-type { color: #888; margin-left: 6px; font-size: 10px; }
+
+    #ifc-filter-panel { padding: 6px 8px; border-top: 1px solid #ccc; background: #f5f5f5; }
+    #ifc-filter-panel summary { cursor: pointer; font-weight: 600; }
+    #ifc-filter-body { max-height: 180px; overflow-y: auto; margin-top: 6px; }
+    #ifc-filter-body label { display: block; padding: 2px 0; }
+
+    /* When tree panel is collapsed, hide everything but the expand button */
+    #app.collapsed #tree-search,
+    #app.collapsed #tree-body,
+    #app.collapsed #tree-actions,
+    #app.collapsed #ifc-filter-panel,
+    #app.collapsed #tree-status,
+    #app.collapsed #tree-header > span { display: none; }
+    #app.collapsed #tree-header { justify-content: center; padding: 6px 2px; }
+    #app.collapsed #tree-collapse { width: 22px; height: 22px; padding: 0; font-size: 14px; border: 1px solid #bbb;
+                                     border-radius: 3px; background: #fff; }
+
+    #viewport { position: relative; overflow: hidden; }
+    #canvas-container { position: absolute; inset: 0; }
+    #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; pointer-events: none; }
+    #status { position: absolute; top: 8px; left: 8px; background: rgba(255,255,255,0.9); padding: 4px 8px;
+              border-radius: 4px; font-size: 12px; color: #333; display: none; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+    .overlay { position: absolute; background: rgba(255,255,255,0.92); padding: 6px 8px; border-radius: 6px;
+               box-shadow: 0 1px 3px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 6px; }
+    .overlay button { padding: 3px 8px; font-size: 11px; cursor: pointer; border: 1px solid #ccc;
+                      border-radius: 3px; background: #f8f8f8; }
+    .overlay button:hover { background: #e8e8e8; }
+    .overlay label { font-size: 11px; color: #444; }
+    .overlay .sep { color: #aaa; margin: 0 2px; }
+
+    #toolbar-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex;
+                   gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
+    #toolbar-top > * { pointer-events: auto; position: static; }
+    #section-controls { bottom: 8px; left: 8px; }
+    #help { bottom: 8px; right: 8px; background: rgba(255,255,255,0.85); padding: 4px 8px; border-radius: 4px;
+            font-size: 11px; color: #666; }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.module.js",
+      "three/examples/jsm/utils/BufferGeometryUtils": "./vendor/three/examples/jsm/utils/BufferGeometryUtils.js",
+      "web-ifc": "./vendor/web-ifc/web-ifc-api.js"
+    }
+  }
+  </script>
+
+  <script>
+    function postHost(msg) {
+      try { window.chrome.webview.postMessage(JSON.stringify(msg)); } catch (_) { /* no host */ }
+    }
+    function postErr(where, err) {
+      postHost({ type: 'jsError',
+        message: (err && (err.message || String(err))) || 'Unknown error',
+        filename: where, lineno: 0, stack: err && err.stack });
+    }
+    window.addEventListener('error', (ev) =>
+      postHost({ type: 'jsError', message: ev.message, filename: ev.filename, lineno: ev.lineno, stack: ev.error && ev.error.stack }));
+    window.addEventListener('unhandledrejection', (ev) =>
+      postHost({ type: 'jsError',
+        message: 'Unhandled rejection: ' + ((ev.reason && ev.reason.message) || String(ev.reason)),
+        stack: ev.reason && ev.reason.stack }));
+
+    function guard(fn, where) {
+      return function (...args) {
+        try { const r = fn.apply(this, args); if (r && typeof r.catch === 'function') r.catch((err) => postErr(where, err)); return r; }
+        catch (err) { postErr(where, err); }
+      };
+    }
+    window.__guard = guard;
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside id="tree-panel">
+      <div id="tree-header">
+        <span>Scene Tree</span>
+        <button id="tree-collapse" title="Collapse panel">◀</button>
+      </div>
+      <input id="tree-search" placeholder="Search by name..."/>
+      <div id="tree-body"></div>
+      <div id="tree-actions">
+        <button id="btn-isolate" disabled title="Hide everything except the selected node">Isolate</button>
+        <button id="btn-hide"    disabled title="Hide the selected node">Hide</button>
+        <button id="btn-show-all"         title="Make everything visible">Show All</button>
+      </div>
+      <details id="ifc-filter-panel" hidden>
+        <summary>IFC Type Filter</summary>
+        <div id="ifc-filter-body"></div>
+      </details>
+      <div id="tree-status">No model loaded.</div>
+    </aside>
+
+    <div id="resizer" title="Drag to resize panel"></div>
+
+    <main id="viewport">
+      <div id="canvas-container"></div>
+      <div id="placeholder">Open an IFC, glTF, OBJ, FBX, or STL file (offline).</div>
+      <div id="status"></div>
+
+      <div id="toolbar-top">
+        <div id="toolbar-views" class="overlay">
+          <label><b>View:</b></label>
+          <button data-view="iso">ISO</button>
+          <button data-view="front">Front</button>
+          <button data-view="back">Back</button>
+          <button data-view="top">Top</button>
+          <button data-view="bottom">Bottom</button>
+          <button data-view="left">Left</button>
+          <button data-view="right">Right</button>
+          <button data-view="fit">Fit</button>
+        </div>
+
+        <div id="toolbar-rotate" class="overlay">
+          <label><b>Rotate model:</b></label>
+          <button data-rot="x+">X+</button><button data-rot="x-">X-</button>
+          <button data-rot="y+">Y+</button><button data-rot="y-">Y-</button>
+          <button data-rot="z+">Z+</button><button data-rot="z-">Z-</button>
+          <button data-rot="flip">Flip</button>
+          <span class="sep">|</span>
+          <button id="btn-bake-fbx" title="Flatten transforms + hide Navisworks cameras/lights (for exploded Navisworks FBX exports)">Bake FBX</button>
+        </div>
+      </div>
+
+      <div id="section-controls" class="overlay">
+        <label><input type="checkbox" id="sec-toggle"/>Section</label>
+        <select id="sec-axis">
+          <option value="x">X</option>
+          <option value="y" selected>Y</option>
+          <option value="z">Z</option>
+        </select>
+        <input type="range" id="sec-slider" min="0" max="1000" value="500" style="width:140px;"/>
+        <button id="sec-flip" title="Flip cut direction">↔</button>
+      </div>
+
+      <div id="help">
+        <b>Left-drag</b>: orbit &nbsp;|&nbsp; <b>Right-drag</b>: pan &nbsp;|&nbsp; <b>Wheel</b>: zoom
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader }    from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
+    import { OBJLoader }     from './vendor/three/examples/jsm/loaders/OBJLoader.js';
+    import { MTLLoader }     from './vendor/three/examples/jsm/loaders/MTLLoader.js';
+    import { FBXLoader }     from './vendor/three/examples/jsm/loaders/FBXLoader.js';
+    import { STLLoader }     from './vendor/three/examples/jsm/loaders/STLLoader.js';
+    import { IFCLoader }     from './vendor/web-ifc-three/IFCLoader.js';
+
+    const guard = window.__guard;
+
+    // ---------- DOM refs ----------
+    const app          = document.getElementById('app');
+    const canvasCt     = document.getElementById('canvas-container');
+    const placeholder  = document.getElementById('placeholder');
+    const statusEl     = document.getElementById('status');
+    const treeBody     = document.getElementById('tree-body');
+    const treeSearch   = document.getElementById('tree-search');
+    const treeStatus   = document.getElementById('tree-status');
+    const treeCollapse = document.getElementById('tree-collapse');
+    const btnIsolate   = document.getElementById('btn-isolate');
+    const btnHide      = document.getElementById('btn-hide');
+    const btnShowAll   = document.getElementById('btn-show-all');
+    const ifcPanel     = document.getElementById('ifc-filter-panel');
+    const ifcBody      = document.getElementById('ifc-filter-body');
+    const secToggle    = document.getElementById('sec-toggle');
+    const secAxis      = document.getElementById('sec-axis');
+    const secSlider    = document.getElementById('sec-slider');
+    const secFlip      = document.getElementById('sec-flip');
+
+    // ---------- Three.js core ----------
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xeeeeee);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
+    camera.position.set(10, 10, 10);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.localClippingEnabled = true;
+    canvasCt.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(1, 2, 1);
+    scene.add(dir);
+    const grid = new THREE.GridHelper(50, 50, 0xcccccc, 0xdddddd);
+    scene.add(grid);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse     = new THREE.Vector2();
+    const clippingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+
+    // ---------- State ----------
+    let loadedObject = null;
+    let nodeIndex    = [];                  // flat list: { object3d, depth, parentId, id, visibleSelf }
+    let selectedId   = null;
+    let ifcLoader    = null;
+    let ifcModelID   = null;
+    let hiddenIfcSubsets = new Map();       // IFC type -> subset mesh (when hidden)
+
+    // ---------- Resize ----------
+    function resize() {
+      const w = canvasCt.clientWidth, h = canvasCt.clientHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = (w || 1) / (h || 1);
+      camera.updateProjectionMatrix();
+    }
+    const ro = new ResizeObserver(guard(resize, 'resize'));
+    ro.observe(canvasCt);
+    resize();
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      try { controls.update(); renderer.render(scene, camera); }
+      catch (err) { postErr('animate', err); }
+    })();
+
+    function setStatus(t) { statusEl.textContent = t; statusEl.style.display = t ? 'block' : 'none'; }
+    function setTreeStatus(t) { treeStatus.textContent = t; }
+
+    // ---------- Clear / fit / load ----------
+    function disposeObject(obj) {
+      obj.traverse?.((o) => {
+        o.geometry?.dispose();
+        const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+        mats.forEach((m) => m.dispose?.());
+      });
+    }
+    function clearScene() {
+      if (loadedObject) { scene.remove(loadedObject); disposeObject(loadedObject); loadedObject = null; }
+      nodeIndex = []; selectedId = null;
+      if (ifcLoader && ifcModelID !== null) {
+        try { ifcLoader.ifcManager.removeSubset?.(ifcModelID); } catch (_) {}
+      }
+      ifcModelID = null; hiddenIfcSubsets.clear();
+      ifcBody.innerHTML = ''; ifcPanel.hidden = true;
+      renderTree();
+      updateActionButtons();
+    }
+    function fitCamera(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3()).length() || 1;
+      const center = box.getCenter(new THREE.Vector3());
+      camera.position.copy(center).add(new THREE.Vector3(size, size * 0.5, size));
+      camera.near = size / 1000; camera.far = size * 100;
+      camera.updateProjectionMatrix();
+      controls.target.copy(center); controls.update();
+      resetSectionRange(box);
+    }
+    function finish(obj, isIfc) {
+      loadedObject = obj;
+      scene.add(loadedObject);
+      fitCamera(loadedObject);
+      placeholder.style.display = 'none';
+      setStatus('');
+      buildIndex();
+      renderTree();
+      if (isIfc) buildIfcFilterAsync().catch((err) => postErr('ifc-filter', err));
+      postHost({ type: 'loaded' });
+    }
+    function fail(err) { setStatus('Error: ' + (err?.message || err)); postErr('load', err); }
+
+    // ---------- Loaders ----------
+    async function loadObjWithMtl(url) {
+      const mtlUrl = url.replace(/\.obj(\?.*)?$/i, '.mtl');
+      try {
+        const head = await fetch(mtlUrl, { method: 'HEAD' });
+        if (head.ok) {
+          const materials = await new Promise((res, rej) => new MTLLoader().load(mtlUrl, res, undefined, rej));
+          materials.preload();
+          new OBJLoader().setMaterials(materials).load(url, (o) => finish(o, false), undefined, fail);
+          return;
+        }
+      } catch (_) { /* fall through */ }
+      new OBJLoader().load(url, (o) => finish(o, false), undefined, fail);
+    }
+    async function loadIfc(url) {
+      if (!ifcLoader) {
+        ifcLoader = new IFCLoader();
+        await ifcLoader.ifcManager.setWasmPath('./vendor/web-ifc/', true);
+      }
+      ifcLoader.load(url, (model) => { ifcModelID = model.modelID; finish(model, true); }, undefined, fail);
+    }
+    function loadFile(url, format) {
+      clearScene();
+      setStatus('Loading ' + format.toUpperCase() + '...');
+      const fmt = format.toLowerCase();
+      try {
+        if (fmt === 'gltf' || fmt === 'glb') new GLTFLoader().load(url, (g) => finish(g.scene, false), undefined, fail);
+        else if (fmt === 'obj') loadObjWithMtl(url);
+        else if (fmt === 'fbx') new FBXLoader().load(url, (o) => finish(o, false), undefined, fail);
+        else if (fmt === 'stl') new STLLoader().load(url, (g) => {
+          g.computeVertexNormals();
+          const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.1, roughness: 0.7 });
+          finish(new THREE.Mesh(g, mat), false);
+        }, undefined, fail);
+        else if (fmt === 'ifc') loadIfc(url);
+        else fail(new Error('Unsupported format: ' + format));
+      } catch (err) { fail(err); }
+    }
+
+    // ---------- Scene tree (virtualized) ----------
+    const ROW_H = 20;
+    let filteredIds = [];
+    function buildIndex() {
+      nodeIndex = [];
+      if (!loadedObject) return;
+      let id = 0;
+      function walk(obj, depth, parentId) {
+        const myId = id++;
+        nodeIndex.push({ id: myId, parentId, object3d: obj, depth, expanded: depth < 2, visibleInTree: true });
+        for (const c of obj.children || []) walk(c, depth + 1, myId);
+      }
+      walk(loadedObject, 0, -1);
+      setTreeStatus(`${nodeIndex.length.toLocaleString()} nodes`);
+    }
+    function nodeName(n) {
+      const o = n.object3d;
+      return o.name || o.type || `#${n.id}`;
+    }
+    function nodeType(n) { return n.object3d.type || ''; }
+
+    function applyFilter() {
+      const q = (treeSearch.value || '').trim().toLowerCase();
+      filteredIds = [];
+      if (!q) {
+        // only include rows whose ancestors are all expanded
+        for (const n of nodeIndex) {
+          let visible = true;
+          let p = n.parentId;
+          while (p !== -1) {
+            const parent = nodeIndex[p];
+            if (!parent.expanded) { visible = false; break; }
+            p = parent.parentId;
+          }
+          if (visible) filteredIds.push(n.id);
+        }
+      } else {
+        // flat filter: show all matches regardless of hierarchy
+        for (const n of nodeIndex) {
+          if (nodeName(n).toLowerCase().includes(q)) filteredIds.push(n.id);
+        }
+      }
+    }
+
+    function renderTree() {
+      applyFilter();
+      // Virtualize: render only the rows that fit in the visible scroll window, with top/bottom spacers.
+      const total  = filteredIds.length;
+      const totalH = total * ROW_H;
+      const scrollTop = treeBody.scrollTop;
+      const height    = treeBody.clientHeight || 300;
+      const first = Math.max(0, Math.floor(scrollTop / ROW_H) - 5);
+      const last  = Math.min(total, Math.ceil((scrollTop + height) / ROW_H) + 5);
+
+      const frag = document.createDocumentFragment();
+      const topSpacer = document.createElement('div');
+      topSpacer.style.height = (first * ROW_H) + 'px';
+      frag.appendChild(topSpacer);
+
+      for (let i = first; i < last; i++) {
+        const n = nodeIndex[filteredIds[i]];
+        frag.appendChild(renderRow(n));
+      }
+
+      const bottomSpacer = document.createElement('div');
+      bottomSpacer.style.height = Math.max(0, (total - last) * ROW_H) + 'px';
+      frag.appendChild(bottomSpacer);
+
+      treeBody.innerHTML = '';
+      treeBody.appendChild(frag);
+
+      // also size the body to total height so the scrollbar is correct
+      treeBody.style.minHeight = '';
+    }
+    function renderRow(n) {
+      const row = document.createElement('div');
+      row.className = 'tree-node' + (n.id === selectedId ? ' selected' : '');
+      row.style.paddingLeft = (4 + n.depth * 10) + 'px';
+      row.dataset.id = n.id;
+      const hasChildren = (n.object3d.children?.length || 0) > 0;
+
+      const toggle = document.createElement('span');
+      toggle.className = 'tree-toggle';
+      toggle.textContent = hasChildren ? (n.expanded ? '▾' : '▸') : '·';
+      toggle.dataset.action = 'toggle';
+      row.appendChild(toggle);
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = n.object3d.visible;
+      cb.dataset.action = 'visibility';
+      row.appendChild(cb);
+
+      const label = document.createElement('span');
+      label.className = 'tree-label';
+      label.textContent = nodeName(n);
+      row.appendChild(label);
+
+      const type = document.createElement('span');
+      type.className = 'tree-type';
+      type.textContent = nodeType(n);
+      row.appendChild(type);
+      return row;
+    }
+
+    // Event delegation: one listener for the whole tree body
+    treeBody.addEventListener('click', guard((ev) => {
+      const row = ev.target.closest('.tree-node');
+      if (!row) return;
+      const id = Number(row.dataset.id);
+      const n  = nodeIndex[id];
+      if (!n) return;
+      const action = ev.target.dataset?.action;
+
+      if (action === 'toggle') {
+        n.expanded = !n.expanded; renderTree(); return;
+      }
+      if (action === 'visibility') {
+        n.object3d.visible = ev.target.checked;
+        return;
+      }
+      // Plain row click: select
+      selectedId = id;
+      renderTree();
+      postProps(n);
+      updateActionButtons();
+    }, 'tree-click'));
+
+    treeBody.addEventListener('scroll', guard(renderTree, 'tree-scroll'));
+    treeSearch.addEventListener('input', guard(renderTree, 'tree-search'));
+
+    let expandedCols = '260px 5px 1fr';
+    app.style.gridTemplateColumns = expandedCols;
+
+    treeCollapse.addEventListener('click', guard(() => {
+      const willCollapse = !app.classList.contains('collapsed');
+      app.classList.toggle('collapsed', willCollapse);
+      app.style.gridTemplateColumns = willCollapse ? '28px 1fr' : expandedCols;
+      treeCollapse.textContent = willCollapse ? '▶' : '◀';
+      requestAnimationFrame(resize);
+    }, 'tree-collapse'));
+
+    // Draggable resizer between tree panel and viewport
+    const resizer = document.getElementById('resizer');
+    let dragOrigin = null;
+    resizer.addEventListener('pointerdown', guard((e) => {
+      if (app.classList.contains('collapsed')) return;
+      dragOrigin = { x: e.clientX, w: document.getElementById('tree-panel').offsetWidth };
+      resizer.classList.add('dragging');
+      resizer.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }, 'resize-down'));
+    resizer.addEventListener('pointermove', guard((e) => {
+      if (!dragOrigin) return;
+      const newW = Math.max(160, Math.min(600, dragOrigin.w + (e.clientX - dragOrigin.x)));
+      expandedCols = `${newW}px 5px 1fr`;
+      app.style.gridTemplateColumns = expandedCols;
+    }, 'resize-move'));
+    const endDrag = () => { dragOrigin = null; resizer.classList.remove('dragging'); resize(); };
+    resizer.addEventListener('pointerup',     guard(endDrag, 'resize-up'));
+    resizer.addEventListener('pointercancel', guard(endDrag, 'resize-cancel'));
+
+    function postProps(n) {
+      const o = n.object3d;
+      const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+      postHost({
+        type: 'selectionOffline',
+        name:        o.name || '(unnamed)',
+        meshType:    o.type,
+        material:    mat?.name || mat?.type || 'default',
+        vertexCount: o.geometry?.attributes?.position?.count ?? 0,
+        distance:    '0',
+      });
+    }
+
+    function updateActionButtons() {
+      const hasSel = selectedId !== null;
+      btnIsolate.disabled = !hasSel;
+      btnHide.disabled    = !hasSel;
+    }
+
+    // ---------- Isolate / Hide / Show All ----------
+    btnIsolate.addEventListener('click', guard(() => {
+      if (selectedId === null || !loadedObject) return;
+      const sel = nodeIndex[selectedId].object3d;
+      // mark selected chain visible, everything else hidden, then re-enable descendants of selected
+      loadedObject.traverse((o) => o.visible = false);
+      sel.traverse((o) => o.visible = true);
+      let p = sel; while (p) { p.visible = true; p = p.parent; }
+      refreshVisibilityCheckboxes();
+    }, 'isolate'));
+    btnHide.addEventListener('click', guard(() => {
+      if (selectedId === null) return;
+      nodeIndex[selectedId].object3d.visible = false;
+      refreshVisibilityCheckboxes();
+    }, 'hide'));
+    btnShowAll.addEventListener('click', guard(() => {
+      if (loadedObject) loadedObject.traverse((o) => o.visible = true);
+      // also restore any IFC type subsets
+      for (const [t, subset] of hiddenIfcSubsets) {
+        if (subset) { scene.add(subset); }
+      }
+      hiddenIfcSubsets.clear();
+      ifcBody.querySelectorAll('input[type=checkbox]').forEach((cb) => cb.checked = true);
+      refreshVisibilityCheckboxes();
+    }, 'show-all'));
+
+    function refreshVisibilityCheckboxes() {
+      treeBody.querySelectorAll('.tree-node').forEach((row) => {
+        const n = nodeIndex[Number(row.dataset.id)];
+        const cb = row.querySelector('input[type=checkbox]');
+        if (n && cb) cb.checked = n.object3d.visible;
+      });
+    }
+
+    // ---------- IFC type filter ----------
+    const COMMON_IFC_TYPES = [
+      'IFCWALL', 'IFCWALLSTANDARDCASE', 'IFCSLAB', 'IFCROOF', 'IFCCOLUMN', 'IFCBEAM',
+      'IFCDOOR', 'IFCWINDOW', 'IFCFURNISHINGELEMENT', 'IFCSTAIR', 'IFCRAILING',
+      'IFCSPACE', 'IFCOPENINGELEMENT', 'IFCBUILDINGELEMENTPROXY', 'IFCPIPESEGMENT',
+      'IFCDUCTSEGMENT', 'IFCFLOWTERMINAL', 'IFCPLATE', 'IFCMEMBER',
+    ];
+    async function buildIfcFilterAsync() {
+      if (ifcModelID === null || !ifcLoader || !window.WebIFC) {
+        ifcPanel.hidden = true;
+        return;
+      }
+      ifcBody.innerHTML = '';
+      ifcPanel.hidden = false;
+      for (const typeName of COMMON_IFC_TYPES) {
+        const typeId = window.WebIFC[typeName];
+        if (!typeId) continue;
+        let ids = [];
+        try { ids = await ifcLoader.ifcManager.getAllItemsOfType(ifcModelID, typeId, false); }
+        catch (err) { postErr('ifc-type-scan', err); continue; }
+        if (!ids.length) continue;
+
+        const row = document.createElement('label');
+        const cb  = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = true;
+        cb.dataset.type = typeName; cb.dataset.typeId = typeId;
+        cb.addEventListener('change', guard((ev) => toggleIfcType(typeName, typeId, ev.target.checked, ids),
+          'ifc-toggle-type'));
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(' ' + typeName.replace(/^IFC/, '') + ` (${ids.length})`));
+        ifcBody.appendChild(row);
+      }
+    }
+    function toggleIfcType(typeName, typeId, visible, ids) {
+      if (!ifcLoader || ifcModelID === null) return;
+      if (!visible) {
+        // Hide by removing those IDs from the base model via subset trick: create a subset without them is complex.
+        // Simpler approach: we set the IFCModel children meshes per-id-visibility not directly supported.
+        // Use createSubset with `removePrevious:false` and a custom material set to invisible won't hide — so:
+        // Iterate and set visible=false on matching geometry via mesh.visible per subset.
+        try {
+          const subset = ifcLoader.ifcManager.createSubset({
+            modelID: ifcModelID, ids, scene, removePrevious: true,
+            customID: 'hide-' + typeName, applyBVH: false,
+          });
+          if (subset) subset.visible = false;
+          hiddenIfcSubsets.set(typeName, subset);
+        } catch (err) { postErr('ifc-hide', err); }
+      } else {
+        const subset = hiddenIfcSubsets.get(typeName);
+        if (subset) { scene.remove(subset); hiddenIfcSubsets.delete(typeName); }
+        try { ifcLoader.ifcManager.removeSubset(ifcModelID, undefined, 'hide-' + typeName); } catch (_) {}
+      }
+    }
+    // Expose WebIFC constants for type ids when available
+    import('web-ifc').then((m) => { window.WebIFC = m; }).catch(() => { /* optional */ });
+
+    // ---------- Section plane ----------
+    let secRange = { min: -10, max: 10 };
+    function resetSectionRange(box) {
+      const axis = secAxis.value;
+      const mn = box.min[axis], mx = box.max[axis];
+      secRange = { min: mn, max: mx };
+      // map slider (0..1000) → position in [min..max]
+      secSlider.value = 500;
+      applySectionPlane();
+    }
+    function applySectionPlane() {
+      if (!secToggle.checked) {
+        renderer.clippingPlanes = [];
+        return;
+      }
+      const axis = secAxis.value;
+      const normalVec = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) }[axis];
+      const dir = secFlip.dataset.dir === '-1' ? -1 : 1;
+      const t = secSlider.value / 1000;
+      const pos = secRange.min + t * (secRange.max - secRange.min);
+      clippingPlane.normal.copy(normalVec).multiplyScalar(-dir);
+      clippingPlane.constant = dir === 1 ? pos : -pos;
+      renderer.clippingPlanes = [clippingPlane];
+    }
+    secToggle.addEventListener('change', guard(applySectionPlane, 'sec-toggle'));
+    secAxis  .addEventListener('change', guard(() => { if (loadedObject) resetSectionRange(new THREE.Box3().setFromObject(loadedObject)); }, 'sec-axis'));
+    secSlider.addEventListener('input',  guard(applySectionPlane, 'sec-slider'));
+    secFlip  .addEventListener('click',  guard(() => {
+      secFlip.dataset.dir = (secFlip.dataset.dir === '-1') ? '1' : '-1';
+      applySectionPlane();
+    }, 'sec-flip'));
+
+    // ---------- View presets ----------
+    function setView(name) {
+      if (!loadedObject) return;
+      const box = new THREE.Box3().setFromObject(loadedObject);
+      if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3()).length() || 1;
+      const c = box.getCenter(new THREE.Vector3());
+      const d = size * 1.2;
+      let pos;
+      switch (name) {
+        case 'front':  pos = new THREE.Vector3(c.x, c.y, c.z + d); break;
+        case 'back':   pos = new THREE.Vector3(c.x, c.y, c.z - d); break;
+        case 'top':    pos = new THREE.Vector3(c.x, c.y + d, c.z); break;
+        case 'bottom': pos = new THREE.Vector3(c.x, c.y - d, c.z); break;
+        case 'left':   pos = new THREE.Vector3(c.x - d, c.y, c.z); break;
+        case 'right':  pos = new THREE.Vector3(c.x + d, c.y, c.z); break;
+        case 'fit':    fitCamera(loadedObject); return;
+        default:       pos = new THREE.Vector3(c.x + d * 0.8, c.y + d * 0.6, c.z + d * 0.8);
+      }
+      camera.position.copy(pos);
+      camera.lookAt(c);
+      controls.target.copy(c); controls.update();
+    }
+    document.getElementById('toolbar-views').addEventListener('click', guard((ev) => {
+      if (ev.target.tagName === 'BUTTON') setView(ev.target.dataset.view);
+    }, 'view-preset'));
+
+    // ---------- Rotate model ----------
+    const HALF_PI = Math.PI / 2;
+    function rotateModel(axis, angle) {
+      if (!loadedObject) return;
+      if (axis === 'x') loadedObject.rotateX(angle);
+      if (axis === 'y') loadedObject.rotateY(angle);
+      if (axis === 'z') loadedObject.rotateZ(angle);
+      fitCamera(loadedObject);
+    }
+    function bakeFbx() {
+      if (!loadedObject) return;
+      const artifactPat = /^(default_camera|current_viewport|distant_light)/i;
+      loadedObject.updateMatrixWorld(true);
+      const newRoot = new THREE.Group();
+      newRoot.name = loadedObject.name || 'baked';
+
+      const meshes = [];
+      loadedObject.traverse((o) => {
+        if (!o.isMesh) return;
+        // Skip Navisworks artifact nodes and any camera/light meshes
+        let p = o; let skip = false;
+        while (p) {
+          if (artifactPat.test(p.name || '')) { skip = true; break; }
+          p = p.parent;
+        }
+        if (!skip) meshes.push(o);
+      });
+
+      for (const m of meshes) {
+        const g = m.geometry.clone();
+        g.applyMatrix4(m.matrixWorld);
+        const baked = new THREE.Mesh(g, m.material);
+        baked.name = m.name || 'mesh';
+        newRoot.add(baked);
+      }
+
+      scene.remove(loadedObject);
+      disposeObject(loadedObject);
+      loadedObject = newRoot;
+      scene.add(loadedObject);
+      fitCamera(loadedObject);
+      buildIndex();
+      renderTree();
+      setStatus(`Baked ${meshes.length} meshes.`);
+      setTimeout(() => setStatus(''), 2500);
+    }
+    document.getElementById('btn-bake-fbx').addEventListener('click', guard(bakeFbx, 'bake-fbx'));
+
+    document.getElementById('toolbar-rotate').addEventListener('click', guard((ev) => {
+      if (ev.target.tagName !== 'BUTTON' || ev.target.id === 'btn-bake-fbx') return;
+      switch (ev.target.dataset.rot) {
+        case 'x+': rotateModel('x',  HALF_PI); break;
+        case 'x-': rotateModel('x', -HALF_PI); break;
+        case 'y+': rotateModel('y',  HALF_PI); break;
+        case 'y-': rotateModel('y', -HALF_PI); break;
+        case 'z+': rotateModel('z',  HALF_PI); break;
+        case 'z-': rotateModel('z', -HALF_PI); break;
+        case 'flip': rotateModel('x', Math.PI); break;
+      }
+    }, 'rotate-model'));
+
+    // ---------- Viewport click: select + forward to tree ----------
+    renderer.domElement.addEventListener('click', guard((event) => {
+      if (!loadedObject) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+      mouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObject(loadedObject, true);
+      if (!hits.length) { selectedId = null; renderTree(); updateActionButtons(); return; }
+      const hit = hits[0];
+      const idx = nodeIndex.findIndex((n) => n.object3d === hit.object);
+      if (idx >= 0) {
+        selectedId = idx;
+        // expand ancestors so the selected row is visible
+        let p = nodeIndex[idx].parentId;
+        while (p !== -1) { nodeIndex[p].expanded = true; p = nodeIndex[p].parentId; }
+        renderTree();
+        postProps(nodeIndex[idx]);
+        updateActionButtons();
+      }
+    }, 'viewport-click'));
+
+    // ---------- Host message bridge ----------
+    window.chrome.webview.addEventListener('message', guard((event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'load') loadFile(msg.url, msg.format);
+    }, 'host-message'));
+
+    postHost({ type: 'ready' });
+  </script>
+</body>
+</html>

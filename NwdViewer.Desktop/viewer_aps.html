@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>NWD Viewer</title>
+  <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css"/>
+  <style>
+    html, body, #viewer { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+    #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                   font-family: sans-serif; color: #888; }
+  </style>
+</head>
+<body>
+  <div id="viewer"></div>
+  <div id="placeholder">Open a .NWD or .NWC file to begin.</div>
+  <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+  <script>
+    let viewer = null;
+
+    function startViewer(urn, token) {
+      document.getElementById('placeholder').style.display = 'none';
+
+      const options = {
+        env: 'AutodeskProduction2',
+        api: 'streamingV2',
+        getAccessToken: (onTokenReady) => onTokenReady(token, 3600),
+      };
+
+      Autodesk.Viewing.Initializer(options, () => {
+        const container = document.getElementById('viewer');
+        if (viewer) { viewer.finish(); viewer = null; }
+        viewer = new Autodesk.Viewing.GuiViewer3D(container);
+        viewer.start();
+
+        const documentId = 'urn:' + urn;
+        Autodesk.Viewing.Document.load(documentId, (doc) => {
+          const defaultModel = doc.getRoot().getDefaultGeometry();
+          viewer.loadDocumentNode(doc, defaultModel);
+
+          viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, (ev) => {
+            const dbId = ev.dbIdArray && ev.dbIdArray[0];
+            if (typeof dbId === 'number') {
+              window.chrome.webview.postMessage(JSON.stringify({ type: 'selection', dbId }));
+            }
+          });
+        }, (errorCode, errorMsg) => {
+          window.chrome.webview.postMessage(JSON.stringify({
+            type: 'error', code: errorCode, message: errorMsg
+          }));
+        });
+      });
+    }
+
+    window.chrome.webview.addEventListener('message', (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'load') startViewer(msg.urn, msg.token);
+      } catch (e) { /* ignore */ }
+    });
+  </script>
+</body>
+</html>

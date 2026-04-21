@@ -1,0 +1,862 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>3D Model Viewer</title>
+  <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css"/>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: Segoe UI, sans-serif; font-size: 12px; }
+    #app { display: grid; grid-template-columns: 260px 5px 1fr; height: 100%; }
+    #resizer { cursor: ew-resize; background: #e4e4e4; transition: background 80ms; user-select: none; }
+    #resizer:hover, #resizer.dragging { background: #7ab3ff; }
+    #app.collapsed #resizer { display: none; }
+    #app.collapsed { grid-template-columns: 28px 1fr; }
+
+    #tree-panel { display: flex; flex-direction: column; border-right: 1px solid #ccc; background: #fafafa; overflow: hidden; }
+    #tree-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #eaeaea; border-bottom: 1px solid #ccc; font-weight: 600; }
+    #tree-collapse { border: none; background: transparent; cursor: pointer; font-size: 12px; padding: 2px 6px; }
+    #tree-search { margin: 6px 8px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 3px; }
+    #tree-body { flex: 1; overflow-y: auto; padding: 4px 0; position: relative; }
+    #tree-actions { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid #ccc; background: #f0f0f0; }
+    #tree-actions button { flex: 1; padding: 4px 2px; font-size: 11px; cursor: pointer; border: 1px solid #bbb; border-radius: 3px; background: #fff; }
+    #tree-actions button:hover { background: #e8e8e8; }
+    #tree-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #tree-status { padding: 4px 8px; font-size: 11px; color: #888; border-top: 1px solid #ddd; background: #fafafa; }
+
+    .tree-node { display: flex; align-items: center; padding: 1px 4px 1px 0; cursor: pointer; white-space: nowrap; user-select: none; }
+    .tree-node:hover { background: #e0efff; }
+    .tree-node.selected { background: #cce4ff; }
+    .tree-node input[type=checkbox] { margin: 0 4px 0 0; }
+    .tree-toggle { display: inline-block; width: 14px; text-align: center; cursor: pointer; color: #666; }
+    .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .tree-type { color: #888; margin-left: 6px; font-size: 10px; }
+
+    #ifc-filter-panel { padding: 6px 8px; border-top: 1px solid #ccc; background: #f5f5f5; }
+    #ifc-filter-panel summary { cursor: pointer; font-weight: 600; }
+    #ifc-filter-body { max-height: 180px; overflow-y: auto; margin-top: 6px; }
+    #ifc-filter-body label { display: block; padding: 2px 0; }
+
+    #app.collapsed #tree-search,
+    #app.collapsed #tree-body,
+    #app.collapsed #tree-actions,
+    #app.collapsed #ifc-filter-panel,
+    #app.collapsed #tree-status,
+    #app.collapsed #tree-header > span { display: none; }
+    #app.collapsed #tree-header { justify-content: center; padding: 6px 2px; }
+    #app.collapsed #tree-collapse { width: 22px; height: 22px; padding: 0; font-size: 14px; border: 1px solid #bbb; border-radius: 3px; background: #fff; }
+
+    #viewport { position: relative; overflow: hidden; }
+    #offline-canvas { position: absolute; inset: 0; }
+    #aps-canvas     { position: absolute; inset: 0; display: none; }
+    #placeholder    { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; pointer-events: none; }
+    #status         { position: absolute; top: 8px; left: 8px; background: rgba(255,255,255,0.9); padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #333; display: none; box-shadow: 0 1px 2px rgba(0,0,0,0.1); z-index: 10; }
+
+    .overlay { background: rgba(255,255,255,0.92); padding: 6px 8px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 6px; z-index: 5; }
+    .overlay button { padding: 3px 8px; font-size: 11px; cursor: pointer; border: 1px solid #ccc; border-radius: 3px; background: #f8f8f8; }
+    .overlay button:hover { background: #e8e8e8; }
+    .overlay label { font-size: 11px; color: #444; }
+    .overlay .sep { color: #aaa; margin: 0 2px; }
+
+    #toolbar-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
+    #toolbar-top > * { pointer-events: auto; position: static; }
+    #section-controls { position: absolute; bottom: 8px; left: 8px; }
+    #help { position: absolute; bottom: 8px; right: 8px; background: rgba(255,255,255,0.85); padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #666; z-index: 5; }
+
+    body.aps-active #offline-canvas,
+    body.aps-active #toolbar-top,
+    body.aps-active #section-controls,
+    body.aps-active #help { display: none; }
+    body.aps-active #aps-canvas { display: block; }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.module.js",
+      "three/examples/jsm/utils/BufferGeometryUtils": "./vendor/three/examples/jsm/utils/BufferGeometryUtils.js",
+      "web-ifc": "./vendor/web-ifc/web-ifc-api.js"
+    }
+  }
+  </script>
+
+  <script>
+    function postHost(msg) {
+      try { window.chrome.webview.postMessage(JSON.stringify(msg)); } catch (_) {}
+    }
+    function postErr(where, err, tabId) {
+      postHost({ type: 'jsError', tabId: tabId ?? null,
+        message: (err && (err.message || String(err))) || 'Unknown error',
+        filename: where, lineno: 0, stack: err && err.stack });
+    }
+    window.addEventListener('error', (ev) =>
+      postHost({ type: 'jsError', message: ev.message, filename: ev.filename, lineno: ev.lineno, stack: ev.error && ev.error.stack }));
+    window.addEventListener('unhandledrejection', (ev) =>
+      postHost({ type: 'jsError', message: 'Unhandled rejection: ' + ((ev.reason && ev.reason.message) || String(ev.reason)), stack: ev.reason && ev.reason.stack }));
+
+    function guard(fn, where) {
+      return function (...args) {
+        try { const r = fn.apply(this, args); if (r && typeof r.catch === 'function') r.catch((err) => postErr(where, err)); return r; }
+        catch (err) { postErr(where, err); }
+      };
+    }
+    window.__guard = guard;
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside id="tree-panel">
+      <div id="tree-header">
+        <span>Scene Tree</span>
+        <button id="tree-collapse" title="Collapse panel">◀</button>
+      </div>
+      <input id="tree-search" placeholder="Search by name..."/>
+      <div id="tree-body"></div>
+      <div id="tree-actions">
+        <button id="btn-isolate" disabled title="Hide everything except the selected node">Isolate</button>
+        <button id="btn-hide"    disabled title="Hide the selected node">Hide</button>
+        <button id="btn-show-all"         title="Make everything visible">Show All</button>
+      </div>
+      <details id="ifc-filter-panel" hidden>
+        <summary>IFC Type Filter</summary>
+        <div id="ifc-filter-body"></div>
+      </details>
+      <div id="tree-status">No tab active.</div>
+    </aside>
+
+    <div id="resizer" title="Drag to resize panel"></div>
+
+    <main id="viewport">
+      <div id="offline-canvas"></div>
+      <div id="aps-canvas"></div>
+      <div id="placeholder">Open a model to begin.</div>
+      <div id="status"></div>
+
+      <div id="toolbar-top">
+        <div id="toolbar-views" class="overlay">
+          <label><b>View:</b></label>
+          <button data-view="iso">ISO</button>
+          <button data-view="front">Front</button>
+          <button data-view="back">Back</button>
+          <button data-view="top">Top</button>
+          <button data-view="bottom">Bottom</button>
+          <button data-view="left">Left</button>
+          <button data-view="right">Right</button>
+          <button data-view="fit">Fit</button>
+        </div>
+
+        <div id="toolbar-rotate" class="overlay">
+          <label><b>Rotate model:</b></label>
+          <button data-rot="x+">X+</button><button data-rot="x-">X-</button>
+          <button data-rot="y+">Y+</button><button data-rot="y-">Y-</button>
+          <button data-rot="z+">Z+</button><button data-rot="z-">Z-</button>
+          <button data-rot="flip">Flip</button>
+          <span class="sep">|</span>
+          <button id="btn-bake-fbx" title="Flatten transforms + hide Navisworks cameras/lights">Bake FBX</button>
+        </div>
+      </div>
+
+      <div id="section-controls" class="overlay">
+        <label><input type="checkbox" id="sec-toggle"/>Section</label>
+        <select id="sec-axis">
+          <option value="x">X</option>
+          <option value="y" selected>Y</option>
+          <option value="z">Z</option>
+        </select>
+        <input type="range" id="sec-slider" min="0" max="1000" value="500" style="width:140px;"/>
+        <button id="sec-flip" title="Flip cut direction">↔</button>
+      </div>
+
+      <div id="help"><b>Left-drag</b>: orbit &nbsp;|&nbsp; <b>Right-drag</b>: pan &nbsp;|&nbsp; <b>Wheel</b>: zoom</div>
+    </main>
+  </div>
+
+  <!-- Autodesk APS Viewer (loaded from CDN — only used when an APS tab is active) -->
+  <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader }    from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
+    import { OBJLoader }     from './vendor/three/examples/jsm/loaders/OBJLoader.js';
+    import { MTLLoader }     from './vendor/three/examples/jsm/loaders/MTLLoader.js';
+    import { FBXLoader }     from './vendor/three/examples/jsm/loaders/FBXLoader.js';
+    import { STLLoader }     from './vendor/three/examples/jsm/loaders/STLLoader.js';
+    import { IFCLoader }     from './vendor/web-ifc-three/IFCLoader.js';
+
+    const guard = window.__guard;
+
+    // ---------- DOM refs ----------
+    const app          = document.getElementById('app');
+    const offlineCt    = document.getElementById('offline-canvas');
+    const apsCt        = document.getElementById('aps-canvas');
+    const placeholder  = document.getElementById('placeholder');
+    const statusEl     = document.getElementById('status');
+    const treeBody     = document.getElementById('tree-body');
+    const treeSearch   = document.getElementById('tree-search');
+    const treeStatus   = document.getElementById('tree-status');
+    const treeCollapse = document.getElementById('tree-collapse');
+    const btnIsolate   = document.getElementById('btn-isolate');
+    const btnHide      = document.getElementById('btn-hide');
+    const btnShowAll   = document.getElementById('btn-show-all');
+    const ifcPanel     = document.getElementById('ifc-filter-panel');
+    const ifcBody      = document.getElementById('ifc-filter-body');
+    const secToggle    = document.getElementById('sec-toggle');
+    const secAxis      = document.getElementById('sec-axis');
+    const secSlider    = document.getElementById('sec-slider');
+    const secFlip      = document.getElementById('sec-flip');
+
+    function setStatus(t) { statusEl.textContent = t; statusEl.style.display = t ? 'block' : 'none'; }
+    function setTreeStatus(t) { treeStatus.textContent = t; }
+
+    // ---------- Shared three.js renderer + controls ----------
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.localClippingEnabled = true;
+    offlineCt.appendChild(renderer.domElement);
+
+    const dummyCam = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
+    dummyCam.position.set(10, 10, 10);
+    const controls = new OrbitControls(dummyCam, renderer.domElement);
+    controls.enableDamping = true;
+
+    function resizeRenderer() {
+      const w = offlineCt.clientWidth, h = offlineCt.clientHeight;
+      renderer.setSize(w, h, false);
+      const st = getActive();
+      if (st && st.camera) { st.camera.aspect = (w || 1) / (h || 1); st.camera.updateProjectionMatrix(); }
+    }
+    const ro = new ResizeObserver(guard(resizeRenderer, 'resize'));
+    ro.observe(offlineCt);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse     = new THREE.Vector2();
+
+    // ---------- Tab state ----------
+    class TabState {
+      constructor(tabId, mode) {
+        this.tabId = tabId;
+        this.mode  = mode;             // 'offline' | 'aps'
+        if (mode === 'offline') {
+          this.scene = new THREE.Scene();
+          this.scene.background = new THREE.Color(0xeeeeee);
+          this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+          const d = new THREE.DirectionalLight(0xffffff, 0.8);
+          d.position.set(1, 2, 1); this.scene.add(d);
+          this.scene.add(new THREE.GridHelper(50, 50, 0xcccccc, 0xdddddd));
+          this.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
+          this.camera.position.set(10, 10, 10);
+          this.loadedObject = null;
+          this.nodeIndex    = [];
+          this.selectedId   = null;
+          this.ifcModelID   = null;
+          this.hiddenIfcSubsets = new Map();
+          this.clipActive   = false;
+          this.clipAxis     = 'y';
+          this.clipSlider   = 500;
+          this.clipDir      = 1;
+          this.clipPlane    = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+          this.clipRange    = { min: -10, max: 10 };
+          this.cameraState  = null;
+        } else {
+          // APS
+          this.urn = null; this.token = null;
+        }
+      }
+      dispose() {
+        if (this.mode !== 'offline') return;
+        if (this.loadedObject) {
+          this.loadedObject.traverse?.((o) => {
+            o.geometry?.dispose();
+            const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+            mats.forEach((m) => m.dispose?.());
+          });
+        }
+        this.hiddenIfcSubsets.forEach((s) => s && s.geometry?.dispose());
+        // Release IFC model from the shared web-ifc manager so wasm memory doesn't accumulate
+        if (ifcLoader && this.ifcModelID !== null) {
+          try { ifcLoader.ifcManager.close?.(this.ifcModelID); } catch (_) {}
+        }
+      }
+    }
+
+    const tabs = new Map();
+    let activeTabId = null;
+    function getActive() { return activeTabId != null ? tabs.get(activeTabId) : null; }
+    function isOfflineActive() { const st = getActive(); return !!st && st.mode === 'offline'; }
+
+    // ---------- Shared IFC loader ----------
+    let ifcLoader = null;
+    async function getIfcLoader() {
+      if (!ifcLoader) {
+        ifcLoader = new IFCLoader();
+        await ifcLoader.ifcManager.setWasmPath('./vendor/web-ifc/', true);
+      }
+      return ifcLoader;
+    }
+
+    // ---------- APS viewer (singleton, reused across APS tabs) ----------
+    let apsViewer = null;
+    let apsInitialized = false;
+    let currentApsTabId = null;
+    function initApsViewer(token, cb) {
+      const options = { env: 'AutodeskProduction2', api: 'streamingV2',
+                        getAccessToken: (onTokenReady) => onTokenReady(token, 3600) };
+      Autodesk.Viewing.Initializer(options, () => {
+        apsInitialized = true;
+        if (!apsViewer) {
+          apsViewer = new Autodesk.Viewing.GuiViewer3D(apsCt);
+          apsViewer.start();
+          apsViewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, (ev) => {
+            const dbId = ev.dbIdArray && ev.dbIdArray[0];
+            if (typeof dbId === 'number' && currentApsTabId != null) {
+              postHost({ type: 'selection', tabId: currentApsTabId, dbId });
+            }
+          });
+        }
+        cb();
+      });
+    }
+    function loadApsTab(tabId, urn, token) {
+      currentApsTabId = tabId;
+      const go = () => {
+        // Unload any previously loaded model so memory doesn't accumulate across APS tab switches
+        try {
+          const models = apsViewer.getVisibleModels?.() || [];
+          for (const m of models) {
+            try { apsViewer.unloadModel(m); } catch (_) {}
+          }
+        } catch (_) {}
+
+        Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
+          const m = doc.getRoot().getDefaultGeometry();
+          apsViewer.loadDocumentNode(doc, m)
+            .then(() => postHost({ type: 'loaded', tabId }))
+            .catch((err) => { postErr('aps-load-model', err, tabId); setStatus('APS load failed.'); });
+        }, (code, msg) => {
+          postErr('aps-doc-load', new Error(`[${code}] ${msg}`), tabId);
+          setStatus('APS error: ' + msg);
+        });
+      };
+      if (!apsInitialized) initApsViewer(token, go); else go();
+    }
+
+    // ---------- Loaders (offline) ----------
+    function fitCamera(st) {
+      if (!st.loadedObject) return;
+      const box = new THREE.Box3().setFromObject(st.loadedObject);
+      if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3()).length() || 1;
+      const center = box.getCenter(new THREE.Vector3());
+      st.camera.position.copy(center).add(new THREE.Vector3(size, size * 0.5, size));
+      st.camera.near = size / 1000; st.camera.far = size * 100;
+      st.camera.updateProjectionMatrix();
+      if (st === getActive()) { controls.target.copy(center); controls.update(); }
+      st.clipRange = { min: box.min[st.clipAxis], max: box.max[st.clipAxis] };
+      applyClipPlane(st);
+    }
+
+    function buildIndex(st) {
+      st.nodeIndex = []; st.selectedId = null;
+      if (!st.loadedObject) return;
+      let id = 0;
+      (function walk(obj, depth, parentId) {
+        const myId = id++;
+        st.nodeIndex.push({ id: myId, parentId, object3d: obj, depth, expanded: depth < 2 });
+        for (const c of obj.children || []) walk(c, depth + 1, myId);
+      })(st.loadedObject, 0, -1);
+    }
+
+    function finishOffline(st, obj, isIfc) {
+      if (st.loadedObject) { st.scene.remove(st.loadedObject); }
+      st.loadedObject = obj;
+      st.scene.add(st.loadedObject);
+      fitCamera(st);
+      buildIndex(st);
+      if (st === getActive()) { renderTree(); }
+      if (isIfc && st === getActive()) buildIfcFilterAsync(st).catch((e) => postErr('ifc-filter', e, st.tabId));
+      setStatus('');
+      placeholder.style.display = 'none';
+      postHost({ type: 'loaded', tabId: st.tabId });
+    }
+    function failLoad(tabId, err) { setStatus('Error: ' + (err?.message || err)); postErr('load', err, tabId); }
+
+    async function loadObjWithMtl(st, url) {
+      const mtlUrl = url.replace(/\.obj(\?.*)?$/i, '.mtl');
+      try {
+        const head = await fetch(mtlUrl, { method: 'HEAD' });
+        if (head.ok) {
+          const materials = await new Promise((res, rej) => new MTLLoader().load(mtlUrl, res, undefined, rej));
+          materials.preload();
+          new OBJLoader().setMaterials(materials).load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+          return;
+        }
+      } catch (_) { /* fall through */ }
+      new OBJLoader().load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+    }
+    async function loadIfc(st, url) {
+      const ldr = await getIfcLoader();
+      ldr.load(url, (model) => { st.ifcModelID = model.modelID; finishOffline(st, model, true); },
+        undefined, (e) => failLoad(st.tabId, e));
+    }
+
+    function loadOfflineFile(st, url, format) {
+      placeholder.style.display = 'none';
+      setStatus('Loading ' + format.toUpperCase() + '...');
+      const fmt = format.toLowerCase();
+      try {
+        if (fmt === 'gltf' || fmt === 'glb') new GLTFLoader().load(url, (g) => finishOffline(st, g.scene, false), undefined, (e) => failLoad(st.tabId, e));
+        else if (fmt === 'obj') loadObjWithMtl(st, url);
+        else if (fmt === 'fbx') new FBXLoader().load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+        else if (fmt === 'stl') new STLLoader().load(url, (g) => {
+          g.computeVertexNormals();
+          const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.1, roughness: 0.7 });
+          finishOffline(st, new THREE.Mesh(g, mat), false);
+        }, undefined, (e) => failLoad(st.tabId, e));
+        else if (fmt === 'ifc') loadIfc(st, url);
+        else failLoad(st.tabId, new Error('Unsupported format: ' + format));
+      } catch (err) { failLoad(st.tabId, err); }
+    }
+
+    // ---------- Tab management ----------
+    function createTab(tabId, mode) {
+      if (tabs.has(tabId)) return;
+      tabs.set(tabId, new TabState(tabId, mode));
+    }
+    function closeTab(tabId) {
+      const st = tabs.get(tabId);
+      if (!st) return;
+      st.dispose();
+      tabs.delete(tabId);
+      if (activeTabId === tabId) { activeTabId = null; updateUiFromActiveTab(); }
+    }
+    function switchTab(tabId) {
+      if (!tabs.has(tabId)) return;
+      // Save camera of the previous active tab
+      const prev = getActive();
+      if (prev && prev.mode === 'offline') {
+        prev.cameraState = { pos: prev.camera.position.clone(), target: controls.target.clone() };
+      }
+      activeTabId = tabId;
+      const st = getActive();
+      if (st.mode === 'offline') {
+        document.body.classList.remove('aps-active');
+        controls.object = st.camera;
+        controls.enabled = true;
+        if (st.cameraState) {
+          st.camera.position.copy(st.cameraState.pos);
+          controls.target.copy(st.cameraState.target);
+        }
+        applyClipPlane(st);
+        resizeRenderer();
+      } else {
+        document.body.classList.add('aps-active');
+        controls.enabled = false;
+        if (st.urn && st.token) { loadApsTab(tabId, st.urn, st.token); }
+      }
+      updateUiFromActiveTab();
+    }
+    function updateUiFromActiveTab() {
+      const st = getActive();
+      if (!st) {
+        setTreeStatus('No tab active.');
+        placeholder.style.display = 'flex'; placeholder.textContent = 'Open a model to begin.';
+        treeBody.innerHTML = ''; ifcBody.innerHTML = ''; ifcPanel.hidden = true;
+        updateActionButtons();
+        document.body.classList.remove('aps-active');
+        return;
+      }
+      if (st.mode === 'offline') {
+        setTreeStatus(`${st.nodeIndex.length.toLocaleString()} nodes`);
+        placeholder.style.display = st.loadedObject ? 'none' : 'flex';
+        if (!st.loadedObject) placeholder.textContent = 'Open a model to begin.';
+        secToggle.checked = st.clipActive;
+        secAxis.value     = st.clipAxis;
+        secSlider.value   = st.clipSlider;
+        secFlip.dataset.dir = String(st.clipDir);
+        renderTree();
+      } else {
+        setTreeStatus('APS tab (tree not available)');
+        treeBody.innerHTML = ''; ifcBody.innerHTML = ''; ifcPanel.hidden = true;
+      }
+      updateActionButtons();
+    }
+
+    // ---------- Render loop ----------
+    (function animate() {
+      requestAnimationFrame(animate);
+      try {
+        const st = getActive();
+        if (!st || st.mode !== 'offline') return;
+        controls.update();
+        renderer.render(st.scene, st.camera);
+      } catch (err) { postErr('animate', err); }
+    })();
+
+    // ---------- Tree (virtualized) ----------
+    const ROW_H = 20;
+    let filteredIds = [];
+    function nodeName(n) { return n.object3d.name || n.object3d.type || `#${n.id}`; }
+    function nodeType(n) { return n.object3d.type || ''; }
+    function applyFilter() {
+      const st = getActive(); if (!st || st.mode !== 'offline') { filteredIds = []; return; }
+      const q = (treeSearch.value || '').trim().toLowerCase();
+      filteredIds = [];
+      if (!q) {
+        for (const n of st.nodeIndex) {
+          let visible = true;
+          let p = n.parentId;
+          while (p !== -1) {
+            const parent = st.nodeIndex[p];
+            if (!parent.expanded) { visible = false; break; }
+            p = parent.parentId;
+          }
+          if (visible) filteredIds.push(n.id);
+        }
+      } else {
+        for (const n of st.nodeIndex) if (nodeName(n).toLowerCase().includes(q)) filteredIds.push(n.id);
+      }
+    }
+    function renderTree() {
+      applyFilter();
+      const st = getActive();
+      const total  = filteredIds.length;
+      const scrollTop = treeBody.scrollTop;
+      const height    = treeBody.clientHeight || 300;
+      const first = Math.max(0, Math.floor(scrollTop / ROW_H) - 5);
+      const last  = Math.min(total, Math.ceil((scrollTop + height) / ROW_H) + 5);
+
+      const frag = document.createDocumentFragment();
+      const topSpacer = document.createElement('div');
+      topSpacer.style.height = (first * ROW_H) + 'px';
+      frag.appendChild(topSpacer);
+
+      for (let i = first; i < last; i++) {
+        const n = st.nodeIndex[filteredIds[i]];
+        frag.appendChild(renderRow(st, n));
+      }
+
+      const bottomSpacer = document.createElement('div');
+      bottomSpacer.style.height = Math.max(0, (total - last) * ROW_H) + 'px';
+      frag.appendChild(bottomSpacer);
+
+      treeBody.innerHTML = '';
+      treeBody.appendChild(frag);
+      setTreeStatus(`${(st ? st.nodeIndex.length : 0).toLocaleString()} nodes`);
+    }
+    function renderRow(st, n) {
+      const row = document.createElement('div');
+      row.className = 'tree-node' + (n.id === st.selectedId ? ' selected' : '');
+      row.style.paddingLeft = (4 + n.depth * 10) + 'px';
+      row.dataset.id = n.id;
+      const hasChildren = (n.object3d.children?.length || 0) > 0;
+
+      const toggle = document.createElement('span');
+      toggle.className = 'tree-toggle';
+      toggle.textContent = hasChildren ? (n.expanded ? '▾' : '▸') : '·';
+      toggle.dataset.action = 'toggle';
+      row.appendChild(toggle);
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = n.object3d.visible;
+      cb.dataset.action = 'visibility';
+      row.appendChild(cb);
+
+      const label = document.createElement('span');
+      label.className = 'tree-label';
+      label.textContent = nodeName(n);
+      row.appendChild(label);
+
+      const type = document.createElement('span');
+      type.className = 'tree-type';
+      type.textContent = nodeType(n);
+      row.appendChild(type);
+      return row;
+    }
+
+    treeBody.addEventListener('click', guard((ev) => {
+      const st = getActive(); if (!st || st.mode !== 'offline') return;
+      const row = ev.target.closest('.tree-node');
+      if (!row) return;
+      const id = Number(row.dataset.id);
+      const n  = st.nodeIndex[id];
+      if (!n) return;
+      const action = ev.target.dataset?.action;
+      if (action === 'toggle') { n.expanded = !n.expanded; renderTree(); return; }
+      if (action === 'visibility') { n.object3d.visible = ev.target.checked; return; }
+      st.selectedId = id;
+      renderTree();
+      postProps(st, n);
+      updateActionButtons();
+    }, 'tree-click'));
+    treeBody.addEventListener('scroll', guard(renderTree, 'tree-scroll'));
+    treeSearch.addEventListener('input', guard(renderTree, 'tree-search'));
+
+    function postProps(st, n) {
+      const o = n.object3d;
+      const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+      postHost({ type: 'selectionOffline', tabId: st.tabId,
+        name: o.name || '(unnamed)', meshType: o.type,
+        material: mat?.name || mat?.type || 'default',
+        vertexCount: o.geometry?.attributes?.position?.count ?? 0, distance: '0' });
+    }
+
+    function updateActionButtons() {
+      const st = getActive();
+      const hasSel = !!st && st.mode === 'offline' && st.selectedId !== null;
+      btnIsolate.disabled = !hasSel;
+      btnHide.disabled    = !hasSel;
+    }
+
+    btnIsolate.addEventListener('click', guard(() => {
+      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedId === null) return;
+      const sel = st.nodeIndex[st.selectedId].object3d;
+      st.loadedObject.traverse((o) => o.visible = false);
+      sel.traverse((o) => o.visible = true);
+      let p = sel; while (p) { p.visible = true; p = p.parent; }
+      refreshVisibilityCheckboxes();
+    }, 'isolate'));
+    btnHide.addEventListener('click', guard(() => {
+      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedId === null) return;
+      st.nodeIndex[st.selectedId].object3d.visible = false;
+      refreshVisibilityCheckboxes();
+    }, 'hide'));
+    btnShowAll.addEventListener('click', guard(() => {
+      const st = getActive(); if (!st || st.mode !== 'offline') return;
+      if (st.loadedObject) st.loadedObject.traverse((o) => o.visible = true);
+      for (const [t, subset] of st.hiddenIfcSubsets) if (subset) st.scene.add(subset);
+      st.hiddenIfcSubsets.clear();
+      ifcBody.querySelectorAll('input[type=checkbox]').forEach((cb) => cb.checked = true);
+      refreshVisibilityCheckboxes();
+    }, 'show-all'));
+
+    function refreshVisibilityCheckboxes() {
+      const st = getActive(); if (!st) return;
+      treeBody.querySelectorAll('.tree-node').forEach((row) => {
+        const n  = st.nodeIndex[Number(row.dataset.id)];
+        const cb = row.querySelector('input[type=checkbox]');
+        if (n && cb) cb.checked = n.object3d.visible;
+      });
+    }
+
+    // ---------- IFC filter ----------
+    const COMMON_IFC_TYPES = [
+      'IFCWALL','IFCWALLSTANDARDCASE','IFCSLAB','IFCROOF','IFCCOLUMN','IFCBEAM',
+      'IFCDOOR','IFCWINDOW','IFCFURNISHINGELEMENT','IFCSTAIR','IFCRAILING',
+      'IFCSPACE','IFCOPENINGELEMENT','IFCBUILDINGELEMENTPROXY','IFCPIPESEGMENT',
+      'IFCDUCTSEGMENT','IFCFLOWTERMINAL','IFCPLATE','IFCMEMBER',
+    ];
+    async function buildIfcFilterAsync(st) {
+      if (!ifcLoader || st.ifcModelID === null || !window.WebIFC) { ifcPanel.hidden = true; return; }
+      ifcBody.innerHTML = ''; ifcPanel.hidden = false;
+      for (const typeName of COMMON_IFC_TYPES) {
+        const typeId = window.WebIFC[typeName];
+        if (!typeId) continue;
+        let ids = [];
+        try { ids = await ifcLoader.ifcManager.getAllItemsOfType(st.ifcModelID, typeId, false); }
+        catch (err) { postErr('ifc-type-scan', err, st.tabId); continue; }
+        if (!ids.length) continue;
+        const row = document.createElement('label');
+        const cb  = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = true;
+        cb.addEventListener('change', guard((ev) => toggleIfcType(st, typeName, typeId, ev.target.checked, ids), 'ifc-toggle-type'));
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(' ' + typeName.replace(/^IFC/, '') + ` (${ids.length})`));
+        ifcBody.appendChild(row);
+      }
+    }
+    function toggleIfcType(st, typeName, typeId, visible, ids) {
+      if (!ifcLoader || st.ifcModelID === null) return;
+      if (!visible) {
+        try {
+          const subset = ifcLoader.ifcManager.createSubset({
+            modelID: st.ifcModelID, ids, scene: st.scene, removePrevious: true,
+            customID: 'hide-' + typeName, applyBVH: false });
+          if (subset) subset.visible = false;
+          st.hiddenIfcSubsets.set(typeName, subset);
+        } catch (err) { postErr('ifc-hide', err, st.tabId); }
+      } else {
+        const subset = st.hiddenIfcSubsets.get(typeName);
+        if (subset) { st.scene.remove(subset); st.hiddenIfcSubsets.delete(typeName); }
+        try { ifcLoader.ifcManager.removeSubset(st.ifcModelID, undefined, 'hide-' + typeName); } catch (_) {}
+      }
+    }
+    import('web-ifc').then((m) => { window.WebIFC = m; }).catch(() => {});
+
+    // ---------- Section plane ----------
+    function applyClipPlane(st) {
+      if (!st || !st.clipActive) { renderer.clippingPlanes = []; return; }
+      const normalVec = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) }[st.clipAxis];
+      const dir = st.clipDir;
+      const t   = st.clipSlider / 1000;
+      const pos = st.clipRange.min + t * (st.clipRange.max - st.clipRange.min);
+      st.clipPlane.normal.copy(normalVec).multiplyScalar(-dir);
+      st.clipPlane.constant = dir === 1 ? pos : -pos;
+      renderer.clippingPlanes = [st.clipPlane];
+    }
+    secToggle.addEventListener('change', guard(() => { const st = getActive(); if (!st || st.mode !== 'offline') return; st.clipActive = secToggle.checked; applyClipPlane(st); }, 'sec-toggle'));
+    secAxis  .addEventListener('change', guard(() => { const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return; st.clipAxis = secAxis.value; const box = new THREE.Box3().setFromObject(st.loadedObject); st.clipRange = { min: box.min[st.clipAxis], max: box.max[st.clipAxis] }; applyClipPlane(st); }, 'sec-axis'));
+    secSlider.addEventListener('input',  guard(() => { const st = getActive(); if (!st || st.mode !== 'offline') return; st.clipSlider = +secSlider.value; applyClipPlane(st); }, 'sec-slider'));
+    secFlip  .addEventListener('click',  guard(() => { const st = getActive(); if (!st || st.mode !== 'offline') return; st.clipDir = st.clipDir === 1 ? -1 : 1; secFlip.dataset.dir = String(st.clipDir); applyClipPlane(st); }, 'sec-flip'));
+
+    // ---------- View presets ----------
+    function setView(name) {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      const box = new THREE.Box3().setFromObject(st.loadedObject); if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3()).length() || 1;
+      const c = box.getCenter(new THREE.Vector3());
+      const d = size * 1.2;
+      let pos;
+      switch (name) {
+        case 'front':  pos = new THREE.Vector3(c.x, c.y, c.z + d); break;
+        case 'back':   pos = new THREE.Vector3(c.x, c.y, c.z - d); break;
+        case 'top':    pos = new THREE.Vector3(c.x, c.y + d, c.z); break;
+        case 'bottom': pos = new THREE.Vector3(c.x, c.y - d, c.z); break;
+        case 'left':   pos = new THREE.Vector3(c.x - d, c.y, c.z); break;
+        case 'right':  pos = new THREE.Vector3(c.x + d, c.y, c.z); break;
+        case 'fit':    fitCamera(st); return;
+        default:       pos = new THREE.Vector3(c.x + d * 0.8, c.y + d * 0.6, c.z + d * 0.8);
+      }
+      st.camera.position.copy(pos);
+      st.camera.lookAt(c);
+      controls.target.copy(c); controls.update();
+    }
+    document.getElementById('toolbar-views').addEventListener('click', guard((ev) => {
+      if (ev.target.tagName === 'BUTTON') setView(ev.target.dataset.view);
+    }, 'view-preset'));
+
+    // ---------- Rotate model + Bake FBX ----------
+    const HALF_PI = Math.PI / 2;
+    function rotateModel(axis, angle) {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      if (axis === 'x') st.loadedObject.rotateX(angle);
+      if (axis === 'y') st.loadedObject.rotateY(angle);
+      if (axis === 'z') st.loadedObject.rotateZ(angle);
+      fitCamera(st);
+    }
+    function bakeFbx() {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      const artifactPat = /^(default_camera|current_viewport|distant_light)/i;
+      st.loadedObject.updateMatrixWorld(true);
+      const newRoot = new THREE.Group();
+      newRoot.name = st.loadedObject.name || 'baked';
+      const meshes = [];
+      st.loadedObject.traverse((o) => {
+        if (!o.isMesh) return;
+        let p = o; let skip = false;
+        while (p) { if (artifactPat.test(p.name || '')) { skip = true; break; } p = p.parent; }
+        if (!skip) meshes.push(o);
+      });
+      for (const m of meshes) {
+        const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld);
+        const baked = new THREE.Mesh(g, m.material);
+        baked.name = m.name || 'mesh';
+        newRoot.add(baked);
+      }
+      st.scene.remove(st.loadedObject);
+      st.loadedObject.traverse?.((o) => {
+        o.geometry?.dispose();
+        const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+        mats.forEach((m) => m.dispose?.());
+      });
+      st.loadedObject = newRoot;
+      st.scene.add(st.loadedObject);
+      fitCamera(st); buildIndex(st); renderTree();
+      setStatus(`Baked ${meshes.length} meshes.`); setTimeout(() => setStatus(''), 2500);
+    }
+    document.getElementById('btn-bake-fbx').addEventListener('click', guard(bakeFbx, 'bake-fbx'));
+    document.getElementById('toolbar-rotate').addEventListener('click', guard((ev) => {
+      if (ev.target.tagName !== 'BUTTON' || ev.target.id === 'btn-bake-fbx') return;
+      switch (ev.target.dataset.rot) {
+        case 'x+': rotateModel('x',  HALF_PI); break;
+        case 'x-': rotateModel('x', -HALF_PI); break;
+        case 'y+': rotateModel('y',  HALF_PI); break;
+        case 'y-': rotateModel('y', -HALF_PI); break;
+        case 'z+': rotateModel('z',  HALF_PI); break;
+        case 'z-': rotateModel('z', -HALF_PI); break;
+        case 'flip': rotateModel('x', Math.PI); break;
+      }
+    }, 'rotate-model'));
+
+    // ---------- Viewport click (offline selection) ----------
+    renderer.domElement.addEventListener('click', guard((event) => {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+      mouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, st.camera);
+      const hits = raycaster.intersectObject(st.loadedObject, true);
+      if (!hits.length) { st.selectedId = null; renderTree(); updateActionButtons(); return; }
+      const hit = hits[0];
+      const idx = st.nodeIndex.findIndex((n) => n.object3d === hit.object);
+      if (idx >= 0) {
+        st.selectedId = idx;
+        let p = st.nodeIndex[idx].parentId;
+        while (p !== -1) { st.nodeIndex[p].expanded = true; p = st.nodeIndex[p].parentId; }
+        renderTree(); postProps(st, st.nodeIndex[idx]); updateActionButtons();
+      }
+    }, 'viewport-click'));
+
+    // ---------- Tree panel collapse / resize ----------
+    let expandedCols = '260px 5px 1fr';
+    app.style.gridTemplateColumns = expandedCols;
+    treeCollapse.addEventListener('click', guard(() => {
+      const willCollapse = !app.classList.contains('collapsed');
+      app.classList.toggle('collapsed', willCollapse);
+      app.style.gridTemplateColumns = willCollapse ? '28px 1fr' : expandedCols;
+      treeCollapse.textContent = willCollapse ? '▶' : '◀';
+      requestAnimationFrame(resizeRenderer);
+    }, 'tree-collapse'));
+    const resizer = document.getElementById('resizer');
+    let dragOrigin = null;
+    resizer.addEventListener('pointerdown', guard((e) => {
+      if (app.classList.contains('collapsed')) return;
+      dragOrigin = { x: e.clientX, w: document.getElementById('tree-panel').offsetWidth };
+      resizer.classList.add('dragging'); resizer.setPointerCapture(e.pointerId); e.preventDefault();
+    }, 'resize-down'));
+    resizer.addEventListener('pointermove', guard((e) => {
+      if (!dragOrigin) return;
+      const newW = Math.max(160, Math.min(600, dragOrigin.w + (e.clientX - dragOrigin.x)));
+      expandedCols = `${newW}px 5px 1fr`;
+      app.style.gridTemplateColumns = expandedCols;
+    }, 'resize-move'));
+    const endDrag = () => { dragOrigin = null; resizer.classList.remove('dragging'); resizeRenderer(); };
+    resizer.addEventListener('pointerup',     guard(endDrag, 'resize-up'));
+    resizer.addEventListener('pointercancel', guard(endDrag, 'resize-cancel'));
+
+    // ---------- Host message bridge ----------
+    window.chrome.webview.addEventListener('message', guard((event) => {
+      const msg = JSON.parse(event.data);
+      switch (msg.type) {
+        case 'createTab':
+          createTab(msg.tabId, msg.mode);
+          break;
+        case 'closeTab':
+          closeTab(msg.tabId);
+          break;
+        case 'switchTab':
+          switchTab(msg.tabId);
+          break;
+        case 'loadOffline': {
+          if (!tabs.has(msg.tabId)) createTab(msg.tabId, 'offline');
+          if (activeTabId !== msg.tabId) switchTab(msg.tabId);
+          const st = tabs.get(msg.tabId);
+          loadOfflineFile(st, msg.url, msg.format);
+          break;
+        }
+        case 'loadAps': {
+          if (!tabs.has(msg.tabId)) createTab(msg.tabId, 'aps');
+          const st = tabs.get(msg.tabId);
+          st.urn = msg.urn; st.token = msg.token;
+          if (activeTabId !== msg.tabId) switchTab(msg.tabId);
+          else loadApsTab(msg.tabId, msg.urn, msg.token);
+          break;
+        }
+      }
+    }, 'host-message'));
+
+    postHost({ type: 'ready' });
+  </script>
+</body>
+</html>

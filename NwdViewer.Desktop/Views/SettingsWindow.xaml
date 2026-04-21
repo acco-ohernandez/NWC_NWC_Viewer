@@ -1,0 +1,43 @@
+<Window x:Class="NwdViewer.Desktop.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Autodesk Platform Services Credentials"
+        Width="520" Height="300"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="140"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Create an app at https://aps.autodesk.com and paste its Client ID and Client Secret here. The Bucket Key is any lowercase alphanumeric string unique to your APS account (it is created automatically on first use)."/>
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Client ID:" VerticalAlignment="Center"/>
+        <TextBox  Grid.Row="1" Grid.Column="1" x:Name="ClientIdBox" Margin="0,4"/>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center"/>
+        <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" Margin="0,4"/>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Bucket Key:" VerticalAlignment="Center"/>
+        <TextBox  Grid.Row="3" Grid.Column="1" x:Name="BucketKeyBox" Margin="0,4"/>
+
+        <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Margin="0,12,0,0" Foreground="Gray"
+                   Text="Stored locally in Windows Credential Manager."/>
+
+        <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Width="90" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="Save"   Width="90" IsDefault="True" Click="OnSave"/>
+        </StackPanel>
+    </Grid>
+</Window>

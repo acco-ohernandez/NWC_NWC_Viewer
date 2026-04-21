@@ -1,0 +1,225 @@
+<Window x:Class="NwdViewer.Desktop.Views.HelpWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="3D Model Viewer — User Guide"
+        Height="680" Width="900"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <Style x:Key="H1" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <Style x:Key="H2" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,14,0,4"/>
+            <Setter Property="Foreground" Value="#2060A0"/>
+        </Style>
+        <Style x:Key="Para" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,2,0,2"/>
+            <Setter Property="LineHeight" Value="18"/>
+        </Style>
+        <Style x:Key="Bul" TargetType="TextBlock" BasedOn="{StaticResource Para}">
+            <Setter Property="Margin" Value="14,2,0,2"/>
+        </Style>
+        <Style TargetType="Bold"><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    </Window.Resources>
+
+    <TabControl Margin="0">
+        <!-- ============== Usage ============== -->
+        <TabItem Header="Usage">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Opening Models"/>
+                    <TextBlock Style="{StaticResource Para}">
+                        <Run Text="The viewer has two independent paths for different file types. Each opened file becomes its own tab in the tab strip at the top."/>
+                    </TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="File → Open .NWD / .NWC (via APS)"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Use for:</Bold> Autodesk Navisworks files (.nwd, .nwc).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Requires:</Bold> APS credentials (Settings → APS Credentials) and internet. The file is uploaded to Autodesk's cloud and translated to SVF2 there.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Renders with:</Bold> Autodesk's own web viewer, so you get full Navisworks fidelity — glass transparency, reflections, curved tessellation, materials.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Cost:</Bold> each translation uses APS cloud credits (free trial available).</TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="File → Open Open Format (IFC, glTF, OBJ, FBX, STL)"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Use for:</Bold> any open-standard 3D file. Runs fully offline — no account, no internet.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Renders with:</Bold> three.js (WebGL) bundled locally. IFC uses web-ifc (local WASM parser).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Multi-file:</Bold> OBJ+MTL and glTF-with-external-.bin/textures are automatically served from the same folder.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H1}" Margin="0,22,0,8" Text="Tabs"/>
+                    <TextBlock Style="{StaticResource Bul}">Each open file gets its own tab. Click a tab header to activate it; click the × to close.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Per-tab state preserved across switches: camera position, selection, tree expansion, section plane, rotation — all persist.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Switching between two offline tabs is instant (scene swap). Switching to/from an APS tab is slower (viewer reloads).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>File → Close Active Tab</Bold> or the × button closes a tab. Geometry and textures are disposed; memory is reclaimed.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H1}" Margin="0,22,0,8" Text="Scene Tree Panel"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Visibility checkbox</Bold> — toggle per-node visibility.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Search</Bold> — type to flatten the tree to matching nodes.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Isolate</Bold> — hide everything except the selected node and its ancestors.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Hide</Bold> — hide only the selected node.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Show All</Bold> — restore full visibility (including anything hidden by IFC type filter).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>IFC Type Filter</Bold> — expandable section at the bottom of the tree, shown only for IFC models. Check/uncheck to hide all elements of that type (IfcWall, IfcDoor, etc.).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Resize handle</Bold> — drag the vertical bar between the panel and viewport to change panel width.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Collapse (◀)</Bold> — collapse panel to 28 pixels; button becomes ▶ to expand again.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H1}" Margin="0,22,0,8" Text="Viewport Controls"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>View presets</Bold> (top-center): ISO / Front / Back / Top / Bottom / Left / Right / Fit.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Rotate model</Bold> (top-right): X± / Y± / Z± rotate the model 90° around that axis; Flip does 180°.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Bake FBX</Bold> (top-right): flattens every mesh's world transform into geometry, hides Navisworks camera/light/viewport artifacts. Use when a Navisworks FBX export loads scattered.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Section plane</Bold> (bottom-left): enable checkbox, pick axis (X/Y/Z), drag slider for cut position, ↔ to flip cut direction.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Click an element</Bold> in the viewport to select it — tree highlights, properties panel populates.</TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ============== Shortcuts ============== -->
+        <TabItem Header="Keyboard &amp; Mouse">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Mouse"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Left drag</Bold> — orbit camera around the model.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Right drag</Bold> — pan the camera.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Scroll wheel</Bold> — zoom in/out.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Left click</Bold> on geometry — select mesh (offline tab) or element (APS tab), populate Properties.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Left click</Bold> on tab header — switch tabs.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H1}" Margin="0,22,0,8" Text="Keyboard (offline tabs)"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>X / Y / Z</Bold> — rotate model 90° around that axis.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Shift + X/Y/Z</Bold> — rotate the other direction.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>U</Bold> — flip model upside-down (180° around X).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>F</Bold> — refit camera to model bounds.</TextBlock>
+                    <TextBlock Style="{StaticResource Para}" FontStyle="Italic" Margin="0,10,0,0" Foreground="#666">
+                        Note: keyboard shortcuts only fire when the viewport has focus. Click inside the viewport once if keys seem unresponsive.
+                    </TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ============== Formats ============== -->
+        <TabItem Header="File Formats">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Supported Formats"/>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="Bold" Text="Format"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" FontWeight="Bold" Text="Path"/>
+                        <TextBlock Grid.Row="0" Grid.Column="2" FontWeight="Bold" Text="Properties / Notes"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text=".nwd" Margin="0,6,0,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="APS (cloud)" Margin="0,6,0,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="Full BIM metadata. Best fidelity." Margin="0,6,0,0"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text=".nwc"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="APS (cloud)"/>
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="Same as .nwd; Navisworks cache."/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text=".ifc"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="Offline"/>
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="IFC type filter, element properties (Name, GlobalId, ObjectType). Parsed locally via web-ifc."/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text=".gltf / .glb"/>
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="Offline"/>
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="Mesh name, material, vertex count. glTF with external .bin + textures supported."/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text=".obj (+.mtl)"/>
+                        <TextBlock Grid.Row="5" Grid.Column="1" Text="Offline"/>
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="Sibling .mtl is loaded automatically if present."/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text=".fbx"/>
+                        <TextBlock Grid.Row="6" Grid.Column="1" Text="Offline"/>
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="Per-mesh properties. Use 'Bake FBX' button if parts render scattered (common with Navisworks FBX exports)."/>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text=".stl"/>
+                        <TextBlock Grid.Row="7" Grid.Column="1" Text="Offline"/>
+                        <TextBlock Grid.Row="7" Grid.Column="2" Text="Single mesh; default gray material."/>
+                    </Grid>
+
+                    <TextBlock Style="{StaticResource H1}" Margin="0,14,0,8" Text="Why .nwd → .fbx Loses Detail"/>
+                    <TextBlock Style="{StaticResource Para}">
+                        When Navisworks exports to FBX it drops materials (transparency, reflections, PBR), coarsens curved-surface tessellation, omits render-time lighting, and often culls hidden interior geometry. That's an exporter limitation, not this viewer's. For full fidelity, use the APS path on the .nwd file directly.
+                    </TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ============== Limitations ============== -->
+        <TabItem Header="Limitations">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Known Limitations"/>
+
+                    <TextBlock Style="{StaticResource H2}" Text="APS (cloud) path"/>
+                    <TextBlock Style="{StaticResource Bul}">Requires a free Autodesk APS account plus network access. Files are uploaded to Autodesk servers.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Each translation consumes cloud credits (free trial available; paid thereafter).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Switching into or out of an APS tab reloads the Autodesk viewer — takes a few seconds.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Scene tree panel is blank for APS tabs (the Autodesk viewer has its own Model Browser).</TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="Offline path"/>
+                    <TextBlock Style="{StaticResource Bul}">No support for .rvt, .dwg, .3dm, .step/.iges, .skp. Convert to IFC / glTF / OBJ first.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">FBX exports from Navisworks often lose materials and show parts scattered. Use <Bold>Bake FBX</Bold> to flatten transforms, or use the APS path instead.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">IFC element selection only shows basic properties (Name, GlobalId, ObjectType). Deep property sets (quantities, psets) would need to be added.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Very large scene trees (&gt; 100k nodes) render fine due to virtualization, but initial parsing can take time — main thread is blocked during the loader callback.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="General"/>
+                    <TextBlock Style="{StaticResource Bul}">No measurement tool. No markup / annotation. No editing or saving.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">No multi-select. Only one element at a time can be Isolated or inspected.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Tabs hold full geometry in memory. Opening many large models (each hundreds of MB) can add up quickly. Close unused tabs to reclaim memory.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Section plane is a single axis-aligned plane. No box clip, no arbitrary-angle cut.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Tab reordering by drag isn't implemented.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="Where to find logs"/>
+                    <TextBlock Style="{StaticResource Para}">
+                        <Run Text="Errors are logged to"/>
+                        <Run FontFamily="Consolas" Text=" %LOCALAPPDATA%\NwdViewer\logs\ "/>
+                        <Run Text="(daily rolling file, last 7 kept). JavaScript errors from the viewer are forwarded here too."/>
+                    </TextBlock>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- ============== About ============== -->
+        <TabItem Header="About">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="3D Model Viewer"/>
+                    <TextBlock Style="{StaticResource Para}">
+                        A standalone desktop viewer for NWD, NWC, FBX, IFC, glTF, OBJ, and STL files. Runs on Windows; built on WPF + WebView2 + three.js + Autodesk Platform Services.
+                    </TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="Components"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>WPF shell</Bold> — tab management, menu, properties panel.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>WebView2</Bold> — hosts the 3D rendering engine.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>three.js 0.149</Bold> — WebGL renderer for open formats (bundled locally).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>web-ifc 0.0.44</Bold> — WASM IFC parser (bundled locally).</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Autodesk APS Viewer 7.x</Bold> — renders .nwd/.nwc via Autodesk cloud translation.</TextBlock>
+
+                    <TextBlock Style="{StaticResource H2}" Text="Credits"/>
+                    <TextBlock Style="{StaticResource Bul}">three.js — MIT license.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">web-ifc / web-ifc-three — Apache 2.0 license.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Microsoft WebView2 — Microsoft Software License Terms.</TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">Autodesk Platform Services — used per Autodesk's terms of service.</TextBlock>
+
+                    <Button Content="Close" HorizontalAlignment="Right" Width="90" Margin="0,20,0,0" Click="OnClose" IsCancel="True"/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+    </TabControl>
+</Window>
