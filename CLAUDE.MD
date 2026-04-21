@@ -176,6 +176,14 @@ The exe's own static files (`viewer.html`, `vendor/`) ARE served via virtual hos
 
 Autodesk APS Viewer 7.x is loaded from CDN (not vendored), only needed when an APS tab is active.
 
+### Optional bundled WebView2 Fixed-Version runtime
+
+`NwdViewer.Desktop/webview2-runtime/` is a gitignored drop-folder for an **optional** Fixed-Version WebView2 Runtime. When populated (instructions in the folder's README.md), the runtime gets copied to the output next to the exe, and `MainWindow.FindBundledRuntime(...)` picks it up automatically at startup — the app no longer depends on Edge/WebView2 being installed on the host machine. Useful for Windows Sandbox, clean VMs, air-gapped workstations, and standalone redistributables.
+
+If the folder is empty (default), the app silently falls back to the system-installed WebView2 runtime. Serilog records which path is taken: look for `Using bundled WebView2 runtime at ...` vs. `Using installed WebView2 runtime`.
+
+Cost of bundling: ≈600 MB of extra binaries shipped with the app (CAB is ≈180 MB compressed; disk footprint is the expanded ≈600 MB). Locale packs and unused Edge components can be pruned down to ≈450 MB — see `webview2-runtime/README.md`.
+
 ### Resilience pattern
 
 Every JS event handler is wrapped in `guard(fn, name)`. Thrown errors and rejected promises post a `jsError` message that lands in WPF `StatusText` + Serilog. The render loop has its own try/catch so a bad frame never kills the viewer.

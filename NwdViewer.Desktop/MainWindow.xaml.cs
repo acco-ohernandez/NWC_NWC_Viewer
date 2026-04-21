@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private bool _jsReady;
     private readonly Queue<string> _pendingMessages = new();
     private readonly Dictionary<int, string> _tabFolders = new();
+    private string? _pendingSavePath;
+    private string? _pendingPdfPath;
 
     public MainWindow()
     {
@@ -51,7 +53,13 @@ public partial class MainWindow : Window
         {
             PostOrQueue(new { type = "switchTab", tabId = _vm.ActiveTab.TabId });
             if (_vm.ActiveTab.Mode == TabMode.Aps && _vm.ActiveTab.Urn != null && _vm.ActiveTab.Token != null)
-                PostOrQueue(new { type = "loadAps", tabId = _vm.ActiveTab.TabId, urn = _vm.ActiveTab.Urn, token = _vm.ActiveTab.Token });
+                PostOrQueue(new
+                {
+                    type  = "loadAps",
+                    tabId = _vm.ActiveTab.TabId,
+                    urn   = NwdViewer.Aps.OssClient.WithoutPrefix(_vm.ActiveTab.Urn),
+                    token = _vm.ActiveTab.Token
+                });
         }
     }
 
@@ -59,7 +67,19 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Viewer.EnsureCoreWebView2Async();
+            var bundled = FindBundledRuntime(Path.Combine(AppContext.BaseDirectory, "webview2-runtime"));
+            CoreWebView2Environment env;
+            if (bundled != null)
+            {
+                Log.Information("Using bundled WebView2 runtime at {Path}", bundled);
+                env = await CoreWebView2Environment.CreateAsync(bundled, userDataFolder: null, options: null);
+            }
+            else
+            {
+                Log.Information("Using installed WebView2 runtime");
+                env = await CoreWebView2Environment.CreateAsync();
+            }
+            await Viewer.EnsureCoreWebView2Async(env);
             Viewer.CoreWebView2.WebMessageReceived += OnViewerMessage;
             Viewer.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "nwdviewer.app", AppContext.BaseDirectory, CoreWebView2HostResourceAccessKind.Allow);
@@ -75,6 +95,25 @@ public partial class MainWindow : Window
             MessageBox.Show(this, $"WebView2 failed to initialize: {ex.Message}",
                 "Viewer Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>
+    /// Looks for a Fixed-Version WebView2 runtime next to the exe. Returns the folder that
+    /// contains msedgewebview2.exe (either the base folder itself, or its first matching child).
+    /// </summary>
+    private static string? FindBundledRuntime(string baseDir)
+    {
+        if (!Directory.Exists(baseDir)) return null;
+        if (File.Exists(Path.Combine(baseDir, "msedgewebview2.exe"))) return baseDir;
+        try
+        {
+            foreach (var sub in Directory.EnumerateDirectories(baseDir))
+            {
+                if (File.Exists(Path.Combine(sub, "msedgewebview2.exe"))) return sub;
+            }
+        }
+        catch { /* unreadable dir — fall through */ }
+        return null;
     }
 
     private void PostOrQueue(object payload)
@@ -104,6 +143,24 @@ public partial class MainWindow : Window
 
                 case "loaded":
                     _vm.StatusText = "Loaded.";
+                    _vm.IsBusy = false;
+                    _vm.ProgressPercent = 100;
+                    break;
+
+                case "loadStart":
+                    _vm.IsBusy = true;
+                    _vm.ProgressPercent = 0;
+                    var fmt = doc.RootElement.GetPropertyOrNull("format")?.GetString();
+                    _vm.StatusText = string.IsNullOrEmpty(fmt) ? "Loading..." : $"Loading {fmt.ToUpperInvariant()}...";
+                    break;
+
+                case "loadProgress":
+                    var pct = doc.RootElement.GetPropertyOrNull("percent")?.GetInt32() ?? 0;
+                    _vm.ProgressPercent = pct;
+                    break;
+
+                case "loadEnd":
+                    _vm.IsBusy = false;
                     break;
 
                 case "selection":
@@ -111,8 +168,12 @@ public partial class MainWindow : Window
                     var tabId = doc.RootElement.GetPropertyOrNull("tabId")?.GetInt32();
                     var dbId  = doc.RootElement.GetPropertyOrNull("dbId")?.GetInt32();
                     var tab   = FindTab(tabId);
+                    Log.Information("APS selection: tabId={Tab} dbId={Db} tabFound={Found} mode={Mode} modelGuid={Guid}",
+                        tabId, dbId, tab != null, tab?.Mode, tab?.ApsModelGuid);
                     if (tab != null && tab.Mode == TabMode.Aps && dbId.HasValue && tab.ApsModelGuid != null)
                         _ = _vm.LoadApsPropertiesAsync(tab, dbId.Value, tab.ApsModelGuid);
+                    else if (tab != null && tab.ApsModelGuid == null)
+                        _vm.StatusText = "Cannot load properties — APS model GUID not set.";
                     break;
                 }
 
@@ -133,6 +194,43 @@ public partial class MainWindow : Window
                     _vm.StatusText = "Viewer error: " + (doc.RootElement.GetPropertyOrNull("message")?.GetString() ?? "unknown");
                     break;
 
+                case "imageData":
+                {
+                    var purpose = doc.RootElement.GetPropertyOrNull("purpose")?.GetString() ?? "image";
+                    var dataUrl = doc.RootElement.GetPropertyOrNull("dataUrl")?.GetString();
+                    var bytes = DecodeDataUrl(dataUrl);
+                    try
+                    {
+                        if (purpose == "pdf" && _pendingPdfPath != null)
+                        {
+                            if (bytes == null || bytes.Length == 0) { _vm.StatusText = "PDF export: capture returned empty data."; }
+                            else
+                            {
+                                PdfExport.WriteSinglePage(_pendingPdfPath, bytes, _vm.ActiveTab?.Title ?? "Model");
+                                _vm.StatusText = $"Saved PDF: {Path.GetFileName(_pendingPdfPath)}";
+                            }
+                            _pendingPdfPath = null;
+                        }
+                        else if (_pendingSavePath != null)
+                        {
+                            if (bytes == null || bytes.Length == 0) { _vm.StatusText = "Image capture returned empty data."; }
+                            else
+                            {
+                                File.WriteAllBytes(_pendingSavePath, bytes);
+                                _vm.StatusText = $"Saved: {Path.GetFileName(_pendingSavePath)}";
+                            }
+                            _pendingSavePath = null;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Save failed ({Purpose})", purpose);
+                        _vm.StatusText = "Save failed: " + ex.Message;
+                        _pendingSavePath = null; _pendingPdfPath = null;
+                    }
+                    break;
+                }
+
                 case "jsError":
                     var jsMsg   = doc.RootElement.GetPropertyOrNull("message")?.GetString();
                     var jsFile  = doc.RootElement.GetPropertyOrNull("filename")?.GetString();
@@ -140,6 +238,7 @@ public partial class MainWindow : Window
                     var jsStack = doc.RootElement.GetPropertyOrNull("stack")?.GetString();
                     Log.Error("JS error: {Msg} @ {File}:{Line}\n{Stack}", jsMsg, jsFile, jsLine, jsStack);
                     _vm.StatusText = $"JS error: {jsMsg}";
+                    _vm.IsBusy = false;
                     break;
             }
         }
@@ -172,10 +271,14 @@ public partial class MainWindow : Window
         try
         {
             var (urn, token, modelGuid) = await _vm.TranslateAsync(dlg.FileName);
+            Log.Information("APS translate complete: urn={Urn} modelGuid={Guid}", urn, modelGuid ?? "(null)");
             var tab = _vm.AddApsTab(dlg.FileName, urn, token);
             tab.ApsModelGuid = modelGuid;
             PostOrQueue(new { type = "createTab", tabId = tab.TabId, mode = "aps" });
-            PostOrQueue(new { type = "loadAps", tabId = tab.TabId, urn, token });
+            // JS Autodesk.Viewing.Document.load wants "urn:<base64>" — our C# URN already has the prefix,
+            // but the viewer.html code prepends another "urn:" itself. Strip our prefix so JS produces
+            // the correct single-prefix form.
+            PostOrQueue(new { type = "loadAps", tabId = tab.TabId, urn = NwdViewer.Aps.OssClient.WithoutPrefix(urn), token });
         }
         catch (Exception ex)
         {
@@ -307,6 +410,56 @@ public partial class MainWindow : Window
         _ => "application/octet-stream",
     };
 
+    private void OnSaveImage(object sender, RoutedEventArgs e)
+    {
+        if (_vm.ActiveTab == null)
+        {
+            MessageBox.Show(this, "Open a model first.", "No active tab", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var baseName = Path.GetFileNameWithoutExtension(_vm.ActiveTab.Title).Replace(" (APS)", "");
+        var dlg = new SaveFileDialog
+        {
+            Filter = "PNG image (*.png)|*.png|JPEG image (*.jpg)|*.jpg",
+            DefaultExt = ".png",
+            FileName = $"{baseName}.png",
+            Title = "Save viewport image",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        _pendingSavePath = dlg.FileName;
+        var format = Path.GetExtension(dlg.FileName).ToLowerInvariant() == ".jpg" ? "image/jpeg" : "image/png";
+        PostOrQueue(new { type = "captureImage", format });
+    }
+
+    private void OnExportPdf(object sender, RoutedEventArgs e)
+    {
+        if (_vm.ActiveTab == null)
+        {
+            MessageBox.Show(this, "Open a model first.", "No active tab", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var baseName = Path.GetFileNameWithoutExtension(_vm.ActiveTab.Title).Replace(" (APS)", "");
+        var dlg = new SaveFileDialog
+        {
+            Filter = "PDF (*.pdf)|*.pdf",
+            DefaultExt = ".pdf",
+            FileName = $"{baseName}.pdf",
+            Title = "Export viewport to PDF",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        _pendingPdfPath = dlg.FileName;
+        _vm.StatusText = "Rendering hi-res image for PDF...";
+        PostOrQueue(new { type = "captureImage", format = "image/png", scale = 3, purpose = "pdf" });
+    }
+
+    private static byte[]? DecodeDataUrl(string? dataUrl)
+    {
+        if (string.IsNullOrEmpty(dataUrl)) return null;
+        var comma = dataUrl.IndexOf(',');
+        var base64 = comma >= 0 ? dataUrl[(comma + 1)..] : dataUrl;
+        return Convert.FromBase64String(base64);
+    }
+
     private void OnConfigureCredentials(object sender, RoutedEventArgs e)
     {
         var existing = _vm.GetCredentials();
@@ -315,11 +468,23 @@ public partial class MainWindow : Window
             _vm.SaveCredentials(window.Result);
     }
 
+    private void OnToggleDarkMode(object sender, RoutedEventArgs e)
+    {
+        var dark = DarkModeItem.IsChecked;
+        PostOrQueue(new { type = "setTheme", theme = dark ? "dark" : "light" });
+    }
+
     private void OnExit(object sender, RoutedEventArgs e) => Close();
 
     private void OnShowHelp(object sender, RoutedEventArgs e)
     {
         var help = new HelpWindow { Owner = this };
+        help.Show();
+    }
+
+    private void OnShowAbout(object sender, RoutedEventArgs e)
+    {
+        var help = new HelpWindow(startTab: "About") { Owner = this };
         help.Show();
     }
 
@@ -347,6 +512,18 @@ public partial class MainWindow : Window
         if (e.Key == System.Windows.Input.Key.F1)
         {
             OnShowHelp(sender, new RoutedEventArgs());
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.S &&
+                 (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+        {
+            OnSaveImage(sender, new RoutedEventArgs());
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.P &&
+                 (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+        {
+            OnExportPdf(sender, new RoutedEventArgs());
             e.Handled = true;
         }
     }

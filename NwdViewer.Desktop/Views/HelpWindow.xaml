@@ -27,7 +27,7 @@
         <Style TargetType="Bold"><Setter Property="FontWeight" Value="SemiBold"/></Style>
     </Window.Resources>
 
-    <TabControl Margin="0">
+    <TabControl x:Name="MainTabs" Margin="0">
         <!-- ============== Usage ============== -->
         <TabItem Header="Usage">
             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
@@ -203,7 +203,14 @@
                     <TextBlock Style="{StaticResource Para}">
                         A standalone desktop viewer for NWD, NWC, FBX, IFC, glTF, OBJ, and STL files. Runs on Windows; built on WPF + WebView2 + three.js + Autodesk Platform Services.
                     </TextBlock>
-
+                    <TextBlock Style="{StaticResource H2}" Text="Author and Developer"/>
+                    <TextBlock Style="{StaticResource Bul}"><Bold>Orlando R Hernandez</Bold></TextBlock>
+                    <TextBlock Style="{StaticResource Bul}">
+                        <Bold>LinkedIn: </Bold>
+                        <Hyperlink NavigateUri="https://www.linkedin.com/in/orlando-hernandez-949ab0172"
+                                   RequestNavigate="OnHyperlinkRequestNavigate">Orlando Hernandez</Hyperlink>
+                    </TextBlock>
+                    
                     <TextBlock Style="{StaticResource H2}" Text="Components"/>
                     <TextBlock Style="{StaticResource Bul}"><Bold>WPF shell</Bold> — tab management, menu, properties panel.</TextBlock>
                     <TextBlock Style="{StaticResource Bul}"><Bold>WebView2</Bold> — hosts the 3D rendering engine.</TextBlock>

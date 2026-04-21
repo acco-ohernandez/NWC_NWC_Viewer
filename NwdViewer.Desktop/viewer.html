@@ -40,6 +40,7 @@
     #app.collapsed #tree-search,
     #app.collapsed #tree-body,
     #app.collapsed #tree-actions,
+    #app.collapsed #tree-options,
     #app.collapsed #ifc-filter-panel,
     #app.collapsed #tree-status,
     #app.collapsed #tree-header > span { display: none; }
@@ -57,17 +58,50 @@
     .overlay button:hover { background: #e8e8e8; }
     .overlay label { font-size: 11px; color: #444; }
     .overlay .sep { color: #aaa; margin: 0 2px; }
+    .overlay button.active { background: #7ab3ff; color: #fff; border-color: #5a9adf; }
+    #measure-label { font-weight: 600; color: #0a7; min-width: 80px; }
+    body.dark #measure-label { color: #7cf7c0; }
+    body.measuring #offline-canvas { cursor: crosshair; }
 
     #toolbar-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
     #toolbar-top > * { pointer-events: auto; position: static; }
-    #section-controls { position: absolute; bottom: 8px; left: 8px; }
+    #section-controls    { position: absolute; bottom: 8px;  left: 8px; }
+    #lighting-controls   { position: absolute; bottom: 44px; left: 8px; }
     #help { position: absolute; bottom: 8px; right: 8px; background: rgba(255,255,255,0.85); padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #666; z-index: 5; }
 
     body.aps-active #offline-canvas,
     body.aps-active #toolbar-top,
     body.aps-active #section-controls,
+    body.aps-active #lighting-controls,
     body.aps-active #help { display: none; }
     body.aps-active #aps-canvas { display: block; }
+
+    /* ---------- Dark theme ---------- */
+    body.dark                        { background: #1f1f1f; color: #ddd; }
+    body.dark #tree-panel            { background: #2a2a2a; color: #ddd; border-right-color: #444; }
+    body.dark #tree-header           { background: #1a1a1a; border-bottom-color: #444; color: #ddd; }
+    body.dark #tree-collapse         { color: #ddd; }
+    body.dark #tree-search           { background: #3a3a3a; color: #ddd; border-color: #555; }
+    body.dark #tree-actions          { background: #1a1a1a; border-top-color: #444; }
+    body.dark #tree-actions button   { background: #3a3a3a; border-color: #555; color: #ddd; }
+    body.dark #tree-actions button:hover  { background: #4a4a4a; }
+    body.dark .tree-node:hover       { background: #2d4055; }
+    body.dark .tree-node.selected    { background: #3a5570; }
+    body.dark .tree-toggle           { color: #bbb; }
+    body.dark .tree-type             { color: #888; }
+    body.dark #tree-status,
+    body.dark #ifc-filter-panel,
+    body.dark #tree-options          { background: #2a2a2a; color: #aaa; border-color: #444; }
+    body.dark #resizer               { background: #444; }
+    body.dark .overlay               { background: rgba(40,40,40,0.92); color: #ddd; }
+    body.dark .overlay label         { color: #ccc; }
+    body.dark .overlay button        { background: #3a3a3a; border-color: #555; color: #ddd; }
+    body.dark .overlay button:hover  { background: #4a4a4a; }
+    body.dark .overlay .sep          { color: #666; }
+    body.dark #placeholder           { color: #888; }
+    body.dark #help                  { background: rgba(40,40,40,0.85); color: #aaa; }
+    body.dark #status                { background: rgba(40,40,40,0.9); color: #ddd; }
+    body.dark #app.collapsed #tree-collapse { background: #3a3a3a; color: #ddd; border-color: #555; }
   </style>
 
   <script type="importmap">
@@ -117,6 +151,10 @@
         <button id="btn-hide"    disabled title="Hide the selected node">Hide</button>
         <button id="btn-show-all"         title="Make everything visible">Show All</button>
       </div>
+      <label id="tree-options" style="display:flex; align-items:center; gap:4px; padding:4px 8px; font-size:11px; color:#555; border-top:1px solid #ddd;">
+        <input type="checkbox" id="cb-keep-view-isolate"/>
+        <span>Keep view on Isolate</span>
+      </label>
       <details id="ifc-filter-panel" hidden>
         <summary>IFC Type Filter</summary>
         <div id="ifc-filter-body"></div>
@@ -152,8 +190,23 @@
           <button data-rot="z+">Z+</button><button data-rot="z-">Z-</button>
           <button data-rot="flip">Flip</button>
           <span class="sep">|</span>
-          <button id="btn-bake-fbx" title="Flatten transforms + hide Navisworks cameras/lights">Bake FBX</button>
+          <button id="btn-bake-fbx" title="Flatten transforms + hide camera/light artifacts">Bake FBX</button>
+          <button id="btn-undo-bake" title="Restore the original (un-baked) scene" disabled>↶ Undo</button>
         </div>
+      </div>
+
+      <div id="lighting-controls" class="overlay">
+        <label><b>Lighting:</b></label>
+        <select id="light-preset" title="Choose a lighting preset">
+          <option value="neutral" selected>Neutral</option>
+          <option value="studio">Studio</option>
+          <option value="outdoor">Outdoor</option>
+          <option value="headlight">Headlight</option>
+        </select>
+        <label>Az:</label>
+        <input type="range" id="light-az" min="0" max="360" value="45" step="1" style="width:80px;" title="Azimuth (degrees)"/>
+        <label>El:</label>
+        <input type="range" id="light-el" min="-30" max="90" value="45" step="1" style="width:80px;" title="Elevation (degrees)"/>
       </div>
 
       <div id="section-controls" class="overlay">
@@ -165,6 +218,9 @@
         </select>
         <input type="range" id="sec-slider" min="0" max="1000" value="500" style="width:140px;"/>
         <button id="sec-flip" title="Flip cut direction">↔</button>
+        <span class="sep">|</span>
+        <button id="btn-measure" title="Click two points to measure distance">📏 Measure</button>
+        <span id="measure-label"></span>
       </div>
 
       <div id="help"><b>Left-drag</b>: orbit &nbsp;|&nbsp; <b>Right-drag</b>: pan &nbsp;|&nbsp; <b>Wheel</b>: zoom</div>
@@ -210,7 +266,7 @@
     function setTreeStatus(t) { treeStatus.textContent = t; }
 
     // ---------- Shared three.js renderer + controls ----------
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(devicePixelRatio);
     renderer.localClippingEnabled = true;
     offlineCt.appendChild(renderer.domElement);
@@ -232,23 +288,94 @@
     const raycaster = new THREE.Raycaster();
     const mouse     = new THREE.Vector2();
 
+    // ---------- Theme state (session-only) ----------
+    let currentTheme = 'light';
+    const THEME_COLORS = {
+      light: { bg: 0xeeeeee, gridMajor: 0xcccccc, gridMinor: 0xdddddd },
+      dark:  { bg: 0x1f1f1f, gridMajor: 0x555555, gridMinor: 0x3a3a3a },
+    };
+
+    // ---------- Lighting state (shared across all offline tabs) ----------
+    let lightingPreset = 'neutral';   // 'neutral' | 'studio' | 'outdoor' | 'headlight'
+    let lightAzimuth   = 45;          // degrees, 0 = +X
+    let lightElevation = 45;          // degrees, 90 = straight above
+
+    function positionLight(light, azDeg, elDeg, distance = 100) {
+      const az = azDeg * Math.PI / 180;
+      const el = elDeg * Math.PI / 180;
+      light.position.set(
+        distance * Math.cos(el) * Math.cos(az),
+        distance * Math.sin(el),
+        distance * Math.cos(el) * Math.sin(az)
+      );
+    }
+
+    function applyLightingToScene(st) {
+      if (!st || st.mode !== 'offline' || !st.scene) return;
+      // Remove previous app-owned lights
+      const toRemove = [];
+      st.scene.children.forEach((o) => { if (o.userData && o.userData.isAppLight) toRemove.push(o); });
+      toRemove.forEach((l) => st.scene.remove(l));
+
+      const add = (light) => { light.userData.isAppLight = true; st.scene.add(light); return light; };
+
+      switch (lightingPreset) {
+        case 'studio': {
+          add(new THREE.AmbientLight(0xffffff, 0.22));
+          const key  = new THREE.DirectionalLight(0xffffff, 0.95);
+          positionLight(key,  lightAzimuth,              lightElevation);                  add(key);
+          const fill = new THREE.DirectionalLight(0xffffff, 0.40);
+          positionLight(fill, lightAzimuth + 140, Math.max(10, lightElevation - 20));      add(fill);
+          const rim  = new THREE.DirectionalLight(0xffffff, 0.35);
+          positionLight(rim,  lightAzimuth - 160, Math.max(0,  lightElevation - 10));      add(rim);
+          break;
+        }
+        case 'outdoor': {
+          add(new THREE.HemisphereLight(0xaad4ff, 0xc0a080, 0.6));
+          const sun = new THREE.DirectionalLight(0xfff4d6, 0.95);
+          positionLight(sun, lightAzimuth, lightElevation);                                add(sun);
+          break;
+        }
+        case 'headlight': {
+          add(new THREE.AmbientLight(0xffffff, 0.20));
+          const h = new THREE.DirectionalLight(0xffffff, 1.0);
+          h.userData.isHeadlight = true;   // updated per-frame in animate()
+          add(h);
+          break;
+        }
+        case 'neutral':
+        default: {
+          add(new THREE.AmbientLight(0xffffff, 0.35));
+          const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+          positionLight(dir, lightAzimuth, lightElevation);                                add(dir);
+          break;
+        }
+      }
+    }
+
+    function applyLightingToAllTabs() {
+      for (const st of tabs.values()) applyLightingToScene(st);
+    }
+
     // ---------- Tab state ----------
     class TabState {
       constructor(tabId, mode) {
         this.tabId = tabId;
         this.mode  = mode;             // 'offline' | 'aps'
         if (mode === 'offline') {
+          const tc = THEME_COLORS[currentTheme];
           this.scene = new THREE.Scene();
-          this.scene.background = new THREE.Color(0xeeeeee);
-          this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-          const d = new THREE.DirectionalLight(0xffffff, 0.8);
-          d.position.set(1, 2, 1); this.scene.add(d);
-          this.scene.add(new THREE.GridHelper(50, 50, 0xcccccc, 0xdddddd));
+          this.scene.background = new THREE.Color(tc.bg);
+          this.grid = new THREE.GridHelper(50, 50, tc.gridMajor, tc.gridMinor);
+          this.scene.add(this.grid);
+          applyLightingToScene(this);   // adds preset-based lights (tagged isAppLight)
           this.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
           this.camera.position.set(10, 10, 10);
           this.loadedObject = null;
+          this.bakeBackup   = null;   // pre-bake loadedObject, detached from scene
           this.nodeIndex    = [];
-          this.selectedId   = null;
+          this.selectedIds  = new Set();
+          this.lastSelId    = null;   // anchor for Shift+click ranges; last clicked
           this.ifcModelID   = null;
           this.hiddenIfcSubsets = new Map();
           this.clipActive   = false;
@@ -258,6 +385,7 @@
           this.clipPlane    = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
           this.clipRange    = { min: -10, max: 10 };
           this.cameraState  = null;
+          this.measure      = { active: false, points: [], group: null };
         } else {
           // APS
           this.urn = null; this.token = null;
@@ -265,13 +393,14 @@
       }
       dispose() {
         if (this.mode !== 'offline') return;
-        if (this.loadedObject) {
-          this.loadedObject.traverse?.((o) => {
-            o.geometry?.dispose();
-            const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-            mats.forEach((m) => m.dispose?.());
-          });
-        }
+        const disposeTree = (root) => root?.traverse?.((o) => {
+          o.geometry?.dispose();
+          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+          mats.forEach((m) => m.dispose?.());
+        });
+        disposeTree(this.loadedObject);
+        disposeTree(this.bakeBackup);
+        if (this.measure?.group) disposeTree(this.measure.group);
         this.hiddenIfcSubsets.forEach((s) => s && s.geometry?.dispose());
         // Release IFC model from the shared web-ifc manager so wasm memory doesn't accumulate
         if (ifcLoader && this.ifcModelID !== null) {
@@ -284,6 +413,25 @@
     let activeTabId = null;
     function getActive() { return activeTabId != null ? tabs.get(activeTabId) : null; }
     function isOfflineActive() { const st = getActive(); return !!st && st.mode === 'offline'; }
+
+    function applyTheme(theme) {
+      if (theme !== 'light' && theme !== 'dark') return;
+      currentTheme = theme;
+      document.body.classList.toggle('dark', theme === 'dark');
+      const tc = THEME_COLORS[theme];
+      for (const st of tabs.values()) {
+        if (st.mode !== 'offline') continue;
+        st.scene.background = new THREE.Color(tc.bg);
+        if (st.grid) {
+          st.scene.remove(st.grid);
+          st.grid.geometry?.dispose();
+          const mats = Array.isArray(st.grid.material) ? st.grid.material : [st.grid.material];
+          mats.forEach((m) => m?.dispose?.());
+        }
+        st.grid = new THREE.GridHelper(50, 50, tc.gridMajor, tc.gridMinor);
+        st.scene.add(st.grid);
+      }
+    }
 
     // ---------- Shared IFC loader ----------
     let ifcLoader = null;
@@ -342,22 +490,64 @@
     }
 
     // ---------- Loaders (offline) ----------
-    function fitCamera(st) {
-      if (!st.loadedObject) return;
-      const box = new THREE.Box3().setFromObject(st.loadedObject);
-      if (box.isEmpty()) return;
+    function getVisibleBoundingBox(root) {
+      const box = new THREE.Box3();
+      if (!root) return box;
+      root.updateMatrixWorld(true);
+      root.traverse((o) => {
+        if (!o.isMesh || !o.geometry) return;
+        // walk up the ancestor chain: if any is invisible, skip
+        let p = o, isHidden = false;
+        while (p) { if (p.visible === false) { isHidden = true; break; } p = p.parent; }
+        if (isHidden) return;
+        o.geometry.computeBoundingBox?.();
+        if (!o.geometry.boundingBox) return;
+        const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+        box.union(b);
+      });
+      return box;
+    }
+
+    // Frames the camera on a bounding box, with a margin factor.
+    function frameCameraToBox(st, box, margin = 1.2) {
+      if (!box || box.isEmpty()) return;
       const size = box.getSize(new THREE.Vector3()).length() || 1;
       const center = box.getCenter(new THREE.Vector3());
-      st.camera.position.copy(center).add(new THREE.Vector3(size, size * 0.5, size));
-      st.camera.near = size / 1000; st.camera.far = size * 100;
+      st.camera.position.copy(center).add(new THREE.Vector3(size * margin, size * margin * 0.5, size * margin));
+      st.camera.near = Math.max(size / 1000, 0.0001);
+      st.camera.far = Math.max(size * 100, 10);
       st.camera.updateProjectionMatrix();
       if (st === getActive()) { controls.target.copy(center); controls.update(); }
+    }
+
+    // Fit camera to ALL visible geometry in the current model (falls back to full bounds if nothing visible).
+    function fitCamera(st) {
+      if (!st.loadedObject) return;
+      let box = getVisibleBoundingBox(st.loadedObject);
+      if (box.isEmpty()) box = new THREE.Box3().setFromObject(st.loadedObject);
+      if (box.isEmpty()) return;
+      frameCameraToBox(st, box);
       st.clipRange = { min: box.min[st.clipAxis], max: box.max[st.clipAxis] };
       applyClipPlane(st);
     }
 
+    // Fit camera to a specific Object3D (mesh or group).
+    function fitCameraToObject(st, obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (box.isEmpty()) return;
+      frameCameraToBox(st, box, 1.6);
+    }
+
+    // Just re-center the orbit pivot on an object without moving the camera.
+    function focusOnObject(st, obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (box.isEmpty()) return;
+      const center = box.getCenter(new THREE.Vector3());
+      if (st === getActive()) { controls.target.copy(center); controls.update(); }
+    }
+
     function buildIndex(st) {
-      st.nodeIndex = []; st.selectedId = null;
+      st.nodeIndex = []; st.selectedIds = new Set(); st.lastSelId = null;
       if (!st.loadedObject) return;
       let id = 0;
       (function walk(obj, depth, parentId) {
@@ -368,7 +558,9 @@
     }
 
     function finishOffline(st, obj, isIfc) {
-      if (st.loadedObject) { st.scene.remove(st.loadedObject); }
+      if (st.loadedObject) { st.scene.remove(st.loadedObject); disposeTree(st.loadedObject); }
+      if (st.bakeBackup)   { disposeTree(st.bakeBackup); st.bakeBackup = null; updateBakeButtons(st); }
+      if (st.measure) { clearMeasure(st); st.measure.active = false; updateMeasureUi(st); }
       st.loadedObject = obj;
       st.scene.add(st.loadedObject);
       fitCamera(st);
@@ -379,40 +571,57 @@
       placeholder.style.display = 'none';
       postHost({ type: 'loaded', tabId: st.tabId });
     }
-    function failLoad(tabId, err) { setStatus('Error: ' + (err?.message || err)); postErr('load', err, tabId); }
+    function failLoad(tabId, err) {
+      setStatus('Error: ' + (err?.message || err));
+      postErr('load', err, tabId);
+      postHost({ type: 'loadEnd', tabId });
+    }
+    function mkProgress(tabId) {
+      return (xhr) => {
+        if (!xhr) return;
+        const total = xhr.total || xhr.lengthComputable && xhr.total;
+        if (total > 0) {
+          const pct = Math.min(99, Math.round((xhr.loaded / total) * 100));
+          postHost({ type: 'loadProgress', tabId, percent: pct });
+        }
+      };
+    }
 
     async function loadObjWithMtl(st, url) {
       const mtlUrl = url.replace(/\.obj(\?.*)?$/i, '.mtl');
+      const onProg = mkProgress(st.tabId);
       try {
         const head = await fetch(mtlUrl, { method: 'HEAD' });
         if (head.ok) {
           const materials = await new Promise((res, rej) => new MTLLoader().load(mtlUrl, res, undefined, rej));
           materials.preload();
-          new OBJLoader().setMaterials(materials).load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+          new OBJLoader().setMaterials(materials).load(url, (o) => finishOffline(st, o, false), onProg, (e) => failLoad(st.tabId, e));
           return;
         }
       } catch (_) { /* fall through */ }
-      new OBJLoader().load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+      new OBJLoader().load(url, (o) => finishOffline(st, o, false), onProg, (e) => failLoad(st.tabId, e));
     }
     async function loadIfc(st, url) {
       const ldr = await getIfcLoader();
       ldr.load(url, (model) => { st.ifcModelID = model.modelID; finishOffline(st, model, true); },
-        undefined, (e) => failLoad(st.tabId, e));
+        mkProgress(st.tabId), (e) => failLoad(st.tabId, e));
     }
 
     function loadOfflineFile(st, url, format) {
       placeholder.style.display = 'none';
       setStatus('Loading ' + format.toUpperCase() + '...');
+      postHost({ type: 'loadStart', tabId: st.tabId, format });
       const fmt = format.toLowerCase();
+      const onProg = mkProgress(st.tabId);
       try {
-        if (fmt === 'gltf' || fmt === 'glb') new GLTFLoader().load(url, (g) => finishOffline(st, g.scene, false), undefined, (e) => failLoad(st.tabId, e));
+        if (fmt === 'gltf' || fmt === 'glb') new GLTFLoader().load(url, (g) => finishOffline(st, g.scene, false), onProg, (e) => failLoad(st.tabId, e));
         else if (fmt === 'obj') loadObjWithMtl(st, url);
-        else if (fmt === 'fbx') new FBXLoader().load(url, (o) => finishOffline(st, o, false), undefined, (e) => failLoad(st.tabId, e));
+        else if (fmt === 'fbx') new FBXLoader().load(url, (o) => finishOffline(st, o, false), onProg, (e) => failLoad(st.tabId, e));
         else if (fmt === 'stl') new STLLoader().load(url, (g) => {
           g.computeVertexNormals();
           const mat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.1, roughness: 0.7 });
           finishOffline(st, new THREE.Mesh(g, mat), false);
-        }, undefined, (e) => failLoad(st.tabId, e));
+        }, onProg, (e) => failLoad(st.tabId, e));
         else if (fmt === 'ifc') loadIfc(st, url);
         else failLoad(st.tabId, new Error('Unsupported format: ' + format));
       } catch (err) { failLoad(st.tabId, err); }
@@ -480,6 +689,8 @@
         treeBody.innerHTML = ''; ifcBody.innerHTML = ''; ifcPanel.hidden = true;
       }
       updateActionButtons();
+      updateBakeButtons(st);
+      updateMeasureUi(st);
     }
 
     // ---------- Render loop ----------
@@ -489,6 +700,12 @@
         const st = getActive();
         if (!st || st.mode !== 'offline') return;
         controls.update();
+        // Headlight: make the primary directional follow the camera each frame
+        if (lightingPreset === 'headlight') {
+          for (const child of st.scene.children) {
+            if (child.userData?.isHeadlight) { child.position.copy(st.camera.position); break; }
+          }
+        }
         renderer.render(st.scene, st.camera);
       } catch (err) { postErr('animate', err); }
     })();
@@ -546,7 +763,7 @@
     }
     function renderRow(st, n) {
       const row = document.createElement('div');
-      row.className = 'tree-node' + (n.id === st.selectedId ? ' selected' : '');
+      row.className = 'tree-node' + (st.selectedIds.has(n.id) ? ' selected' : '');
       row.style.paddingLeft = (4 + n.depth * 10) + 'px';
       row.dataset.id = n.id;
       const hasChildren = (n.object3d.children?.length || 0) > 0;
@@ -585,9 +802,33 @@
       const action = ev.target.dataset?.action;
       if (action === 'toggle') { n.expanded = !n.expanded; renderTree(); return; }
       if (action === 'visibility') { n.object3d.visible = ev.target.checked; return; }
-      st.selectedId = id;
+
+      if (ev.shiftKey && st.lastSelId !== null) {
+        // Range: from lastSelId to id in the CURRENT visible order (filteredIds).
+        const a = filteredIds.indexOf(st.lastSelId);
+        const b = filteredIds.indexOf(id);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          const range = filteredIds.slice(lo, hi + 1);
+          // Replace set with range — anchor (lastSelId) stays
+          st.selectedIds = new Set(range);
+        } else {
+          // anchor no longer visible — fall back to single-select
+          st.selectedIds = new Set([id]); st.lastSelId = id;
+        }
+      } else if (ev.ctrlKey || ev.metaKey) {
+        // Toggle individual in the set
+        if (st.selectedIds.has(id)) st.selectedIds.delete(id);
+        else st.selectedIds.add(id);
+        st.lastSelId = id;
+      } else {
+        st.selectedIds = new Set([id]);
+        st.lastSelId = id;
+      }
+
       renderTree();
-      postProps(st, n);
+      postProps(st, n);        // properties panel shows the last-clicked
+      focusOnObject(st, n.object3d);
       updateActionButtons();
     }, 'tree-click'));
     treeBody.addEventListener('scroll', guard(renderTree, 'tree-scroll'));
@@ -604,23 +845,37 @@
 
     function updateActionButtons() {
       const st = getActive();
-      const hasSel = !!st && st.mode === 'offline' && st.selectedId !== null;
+      const hasSel = !!st && st.mode === 'offline' && st.selectedIds.size > 0;
       btnIsolate.disabled = !hasSel;
       btnHide.disabled    = !hasSel;
     }
 
+    const cbKeepViewIsolate = document.getElementById('cb-keep-view-isolate');
     btnIsolate.addEventListener('click', guard(() => {
-      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedId === null) return;
-      const sel = st.nodeIndex[st.selectedId].object3d;
+      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedIds.size === 0) return;
+      // hide all, then un-hide selected objects + their subtrees + their ancestors
       st.loadedObject.traverse((o) => o.visible = false);
-      sel.traverse((o) => o.visible = true);
-      let p = sel; while (p) { p.visible = true; p = p.parent; }
+      const selObjects = [];
+      for (const id of st.selectedIds) {
+        const o = st.nodeIndex[id]?.object3d; if (!o) continue;
+        selObjects.push(o);
+        o.traverse((c) => c.visible = true);
+        let p = o; while (p) { p.visible = true; p = p.parent; }
+      }
       refreshVisibilityCheckboxes();
+      if (!cbKeepViewIsolate.checked && selObjects.length) {
+        const unionBox = new THREE.Box3();
+        selObjects.forEach((o) => unionBox.expandByObject(o));
+        frameCameraToBox(st, unionBox, 1.6);
+      }
     }, 'isolate'));
     btnHide.addEventListener('click', guard(() => {
-      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedId === null) return;
-      st.nodeIndex[st.selectedId].object3d.visible = false;
+      const st = getActive(); if (!st || st.mode !== 'offline' || st.selectedIds.size === 0) return;
+      for (const id of st.selectedIds) {
+        const o = st.nodeIndex[id]?.object3d; if (o) o.visible = false;
+      }
       refreshVisibilityCheckboxes();
+      fitCamera(st);
     }, 'hide'));
     btnShowAll.addEventListener('click', guard(() => {
       const st = getActive(); if (!st || st.mode !== 'offline') return;
@@ -735,39 +990,167 @@
       if (axis === 'z') st.loadedObject.rotateZ(angle);
       fitCamera(st);
     }
-    function bakeFbx() {
-      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
-      const artifactPat = /^(default_camera|current_viewport|distant_light)/i;
-      st.loadedObject.updateMatrixWorld(true);
-      const newRoot = new THREE.Group();
-      newRoot.name = st.loadedObject.name || 'baked';
-      const meshes = [];
-      st.loadedObject.traverse((o) => {
-        if (!o.isMesh) return;
-        let p = o; let skip = false;
-        while (p) { if (artifactPat.test(p.name || '')) { skip = true; break; } p = p.parent; }
-        if (!skip) meshes.push(o);
-      });
-      for (const m of meshes) {
-        const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld);
-        const baked = new THREE.Mesh(g, m.material);
-        baked.name = m.name || 'mesh';
-        newRoot.add(baked);
+    // Ancestor-chain check: is this mesh under a camera/light node, or an artifact-named node?
+    const ARTIFACT_NAME_PAT = /^(default_camera|current_viewport|distant_light|target_cam|spot_light|point_light|area_light|hemi_light)/i;
+    function isArtifactDescendant(obj) {
+      let p = obj;
+      while (p) {
+        if (p.isCamera || p.isLight) return true;
+        if (ARTIFACT_NAME_PAT.test(p.name || '')) return true;
+        p = p.parent;
       }
-      st.scene.remove(st.loadedObject);
-      st.loadedObject.traverse?.((o) => {
+      return false;
+    }
+    function disposeTree(root) {
+      root?.traverse?.((o) => {
         o.geometry?.dispose();
         const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
         mats.forEach((m) => m.dispose?.());
       });
+    }
+    function updateBakeButtons(st) {
+      document.getElementById('btn-undo-bake').disabled = !(st && st.mode === 'offline' && st.bakeBackup);
+    }
+
+    function bakeFbx() {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      // Dispose any previous backup — single-level undo.
+      if (st.bakeBackup) { disposeTree(st.bakeBackup); st.bakeBackup = null; }
+
+      st.loadedObject.updateMatrixWorld(true);
+      const newRoot = new THREE.Group();
+      newRoot.name = st.loadedObject.name || 'baked';
+
+      let keptCount = 0, skippedCount = 0;
+      st.loadedObject.traverse((o) => {
+        if (!o.isMesh) return;
+        if (isArtifactDescendant(o)) { skippedCount++; return; }
+        const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+        const baked = new THREE.Mesh(g, o.material);
+        baked.name = o.name || 'mesh';
+        newRoot.add(baked);
+        keptCount++;
+      });
+
+      // Detach (don't dispose) old root — kept as backup for Undo
+      st.scene.remove(st.loadedObject);
+      st.bakeBackup = st.loadedObject;
+
       st.loadedObject = newRoot;
       st.scene.add(st.loadedObject);
       fitCamera(st); buildIndex(st); renderTree();
-      setStatus(`Baked ${meshes.length} meshes.`); setTimeout(() => setStatus(''), 2500);
+      updateBakeButtons(st);
+
+      const detail = skippedCount > 0
+        ? `Baked ${keptCount} meshes · hid ${skippedCount} camera/light artifacts. (Undo available.)`
+        : `Baked ${keptCount} meshes. (Undo available.)`;
+      setStatus(detail); setTimeout(() => setStatus(''), 3500);
     }
+
+    function undoBakeFbx() {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.bakeBackup) return;
+      // Remove + dispose current baked root
+      st.scene.remove(st.loadedObject);
+      disposeTree(st.loadedObject);
+      // Restore original
+      st.loadedObject = st.bakeBackup;
+      st.bakeBackup = null;
+      st.scene.add(st.loadedObject);
+      fitCamera(st); buildIndex(st); renderTree();
+      updateBakeButtons(st);
+      setStatus('Bake undone — original scene restored.'); setTimeout(() => setStatus(''), 2500);
+    }
+
     document.getElementById('btn-bake-fbx').addEventListener('click', guard(bakeFbx, 'bake-fbx'));
+    document.getElementById('btn-undo-bake').addEventListener('click', guard(undoBakeFbx, 'undo-bake'));
+
+    // ---------- Lighting controls wiring ----------
+    const lightPresetEl = document.getElementById('light-preset');
+    const lightAzEl     = document.getElementById('light-az');
+    const lightElEl     = document.getElementById('light-el');
+    function updateLightSliderEnabled() {
+      const locked = lightingPreset === 'headlight';
+      lightAzEl.disabled = lightElEl.disabled = locked;
+      lightAzEl.style.opacity = lightElEl.style.opacity = locked ? 0.4 : 1;
+    }
+    lightPresetEl.addEventListener('change', guard(() => {
+      lightingPreset = lightPresetEl.value;
+      updateLightSliderEnabled();
+      applyLightingToAllTabs();
+    }, 'light-preset'));
+    lightAzEl.addEventListener('input', guard(() => {
+      lightAzimuth = +lightAzEl.value;
+      if (lightingPreset !== 'headlight') applyLightingToAllTabs();
+    }, 'light-az'));
+    lightElEl.addEventListener('input', guard(() => {
+      lightElevation = +lightElEl.value;
+      if (lightingPreset !== 'headlight') applyLightingToAllTabs();
+    }, 'light-el'));
+    updateLightSliderEnabled();
+
+    // ---------- Measurement tool ----------
+    const btnMeasure    = document.getElementById('btn-measure');
+    const measureLabel  = document.getElementById('measure-label');
+    function clearMeasure(st) {
+      if (!st || !st.measure) return;
+      if (st.measure.group) {
+        st.scene.remove(st.measure.group);
+        st.measure.group.traverse((o) => {
+          o.geometry?.dispose();
+          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+          mats.forEach((m) => m?.dispose?.());
+        });
+        st.measure.group = null;
+      }
+      st.measure.points = [];
+    }
+    function updateMeasureUi(st) {
+      const isActive = !!(st && st.mode === 'offline' && st.measure?.active);
+      btnMeasure.classList.toggle('active', isActive);
+      document.body.classList.toggle('measuring', isActive);
+      const pts = st?.measure?.points || [];
+      if (pts.length === 2) {
+        measureLabel.textContent = pts[0].distanceTo(pts[1]).toFixed(3);
+      } else if (isActive) {
+        measureLabel.textContent = pts.length === 1 ? 'pick 2nd point…' : 'pick 1st point…';
+      } else {
+        measureLabel.textContent = '';
+      }
+    }
+    function addMeasurePoint(st, point) {
+      if (!st.measure.group) { st.measure.group = new THREE.Group(); st.scene.add(st.measure.group); }
+      // Marker sphere sized relative to model scale
+      const box = new THREE.Box3().setFromObject(st.loadedObject);
+      const size = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length();
+      const r = Math.max(size * 0.005, 0.01);
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff3b30, depthTest: false, transparent: true, opacity: 0.9 })
+      );
+      sphere.renderOrder = 9999;
+      sphere.position.copy(point);
+      st.measure.group.add(sphere);
+      st.measure.points.push(point.clone());
+      if (st.measure.points.length === 2) {
+        const [a, b] = st.measure.points;
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([a, b]),
+          new THREE.LineBasicMaterial({ color: 0xff3b30, depthTest: false, transparent: true, opacity: 0.9 })
+        );
+        line.renderOrder = 9999;
+        st.measure.group.add(line);
+      }
+    }
+    btnMeasure.addEventListener('click', guard(() => {
+      const st = getActive(); if (!st || st.mode !== 'offline') return;
+      st.measure.active = !st.measure.active;
+      if (!st.measure.active) clearMeasure(st);
+      else clearMeasure(st);   // clear on enter too
+      updateMeasureUi(st);
+    }, 'measure-toggle'));
     document.getElementById('toolbar-rotate').addEventListener('click', guard((ev) => {
-      if (ev.target.tagName !== 'BUTTON' || ev.target.id === 'btn-bake-fbx') return;
+      if (ev.target.tagName !== 'BUTTON') return;
+      if (ev.target.id === 'btn-bake-fbx' || ev.target.id === 'btn-undo-bake') return;
       switch (ev.target.dataset.rot) {
         case 'x+': rotateModel('x',  HALF_PI); break;
         case 'x-': rotateModel('x', -HALF_PI); break;
@@ -780,23 +1163,56 @@
     }, 'rotate-model'));
 
     // ---------- Viewport click (offline selection) ----------
-    renderer.domElement.addEventListener('click', guard((event) => {
-      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+    function pickFromViewport(st, event) {
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
       mouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouse, st.camera);
       const hits = raycaster.intersectObject(st.loadedObject, true);
-      if (!hits.length) { st.selectedId = null; renderTree(); updateActionButtons(); return; }
-      const hit = hits[0];
+      return hits.length ? hits[0] : null;
+    }
+    // Track pointer-down to distinguish a click from a drag release.
+    const CLICK_DRAG_THRESHOLD = 4; // pixels
+    let pressPos = null;
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) { pressPos = null; return; }
+      pressPos = { x: e.clientX, y: e.clientY };
+    });
+    renderer.domElement.addEventListener('pointerup', guard((event) => {
+      if (event.button !== 0 || !pressPos) { pressPos = null; return; }
+      const dx = event.clientX - pressPos.x;
+      const dy = event.clientY - pressPos.y;
+      pressPos = null;
+      if (Math.abs(dx) > CLICK_DRAG_THRESHOLD || Math.abs(dy) > CLICK_DRAG_THRESHOLD) return; // it was a drag
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      // Measurement takes precedence
+      if (st.measure?.active) {
+        const hit = pickFromViewport(st, event);
+        if (!hit) return;
+        if (st.measure.points.length === 2) clearMeasure(st); // 3rd click starts over
+        addMeasurePoint(st, hit.point);
+        updateMeasureUi(st);
+        return;
+      }
+      const hit = pickFromViewport(st, event);
+      if (!hit) { st.selectedIds.clear(); st.lastSelId = null; renderTree(); updateActionButtons(); return; }
       const idx = st.nodeIndex.findIndex((n) => n.object3d === hit.object);
       if (idx >= 0) {
-        st.selectedId = idx;
+        // Viewport click always single-selects (replace set).
+        st.selectedIds = new Set([idx]);
+        st.lastSelId = idx;
         let p = st.nodeIndex[idx].parentId;
         while (p !== -1) { st.nodeIndex[p].expanded = true; p = st.nodeIndex[p].parentId; }
         renderTree(); postProps(st, st.nodeIndex[idx]); updateActionButtons();
+        focusOnObject(st, hit.object);
       }
     }, 'viewport-click'));
+    // Double-click: frame the picked object (fill viewport with it)
+    renderer.domElement.addEventListener('dblclick', guard((event) => {
+      const st = getActive(); if (!st || st.mode !== 'offline' || !st.loadedObject) return;
+      const hit = pickFromViewport(st, event);
+      if (hit) fitCameraToObject(st, hit.object);
+    }, 'viewport-dblclick'));
 
     // ---------- Tree panel collapse / resize ----------
     let expandedCols = '260px 5px 1fr';
@@ -851,6 +1267,35 @@
           st.urn = msg.urn; st.token = msg.token;
           if (activeTabId !== msg.tabId) switchTab(msg.tabId);
           else loadApsTab(msg.tabId, msg.urn, msg.token);
+          break;
+        }
+        case 'setTheme':
+          applyTheme(msg.theme);
+          break;
+        case 'captureImage': {
+          const st = getActive();
+          const fmt = msg.format || 'image/png';
+          const scale = Math.max(1, Math.min(6, Number(msg.scale) || 1));
+          const purpose = msg.purpose || 'image';
+          if (!st) { postHost({ type: 'imageData', dataUrl: '', purpose }); break; }
+          if (st.mode === 'offline') {
+            try {
+              const size = renderer.getSize(new THREE.Vector2());
+              if (scale !== 1) renderer.setSize(size.x * scale, size.y * scale, false);
+              renderer.render(st.scene, st.camera);
+              const dataUrl = renderer.domElement.toDataURL(fmt);
+              if (scale !== 1) { renderer.setSize(size.x, size.y, false); renderer.render(st.scene, st.camera); }
+              postHost({ type: 'imageData', dataUrl, purpose });
+            } catch (err) { postErr('capture', err); postHost({ type: 'imageData', dataUrl: '', purpose }); }
+          } else if (apsViewer) {
+            try {
+              const w = (apsCt.clientWidth || 1920) * scale;
+              const h = (apsCt.clientHeight || 1080) * scale;
+              apsViewer.getScreenShot(w, h, (dataUrl) => postHost({ type: 'imageData', dataUrl: dataUrl || '', purpose }));
+            } catch (err) { postErr('capture-aps', err); postHost({ type: 'imageData', dataUrl: '', purpose }); }
+          } else {
+            postHost({ type: 'imageData', dataUrl: '', purpose });
+          }
           break;
         }
       }

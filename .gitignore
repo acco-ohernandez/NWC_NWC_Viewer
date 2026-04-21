@@ -361,3 +361,16 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Bundled WebView2 Fixed-Version runtime (user-populated, ~180 MB)
+# Keep the README but ignore the actual runtime binaries
+NwdViewer.Desktop/webview2-runtime/**
+!NwdViewer.Desktop/webview2-runtime/README.md
+
+# The default `*.aps` rule above (for Visual C++ resource files) accidentally
+# matches our NwdViewer.Aps/ directory on case-insensitive Windows. Re-include it,
+# but still keep build output out.
+!NwdViewer.Aps/
+!NwdViewer.Aps/**
+NwdViewer.Aps/bin/
+NwdViewer.Aps/obj/

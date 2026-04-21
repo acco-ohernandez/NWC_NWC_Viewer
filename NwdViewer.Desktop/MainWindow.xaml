@@ -29,16 +29,23 @@
                 <MenuItem Header="_Open .NWD / .NWC (via APS)..." Click="OnOpenApsFile"/>
                 <MenuItem Header="Open _Open Format (IFC, glTF, OBJ, FBX, STL)..." Click="OnOpenOfflineFile"/>
                 <Separator/>
+                <MenuItem Header="_Save Image As..." Click="OnSaveImage" InputGestureText="Ctrl+S"/>
+                <MenuItem Header="Export to _PDF..."   Click="OnExportPdf"   InputGestureText="Ctrl+P"/>
+                <Separator/>
                 <MenuItem Header="_Close Active Tab" Click="OnCloseActiveTab"/>
                 <Separator/>
                 <MenuItem Header="E_xit" Click="OnExit"/>
             </MenuItem>
             <MenuItem Header="_Settings">
                 <MenuItem Header="APS _Credentials..." Click="OnConfigureCredentials"/>
+                <Separator/>
+                <MenuItem x:Name="DarkModeItem" Header="_Dark Mode" IsCheckable="True" Click="OnToggleDarkMode"/>
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_User Guide..." Click="OnShowHelp" InputGestureText="F1"/>
                 <MenuItem Header="Open _Log Folder" Click="OnOpenLogFolder"/>
+                <Separator/>
+                <MenuItem Header="_About..." Click="OnShowAbout"/>
             </MenuItem>
         </Menu>
 
