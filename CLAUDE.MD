@@ -217,3 +217,22 @@ Serilog log: `%LOCALAPPDATA%\NwdViewer\logs\nwdviewer-YYYYMMDD.log` (daily rolli
 - No multi-select.
 - No support for .rvt, .dwg, .3dm, .step, .skp — convert to IFC / glTF / OBJ first.
 - Not optimized for batch operations; one user, one window.
+
+## Current verification status (as of this commit)
+
+**Verified by hand:**
+- Offline loading: FBX, glTF/GLB, OBJ, STL.
+- Multi-tab open/switch/close with per-tab camera + selection state.
+- Scene tree (hierarchy, search, visibility, Isolate/Hide/Show All).
+- Section plane, view presets, rotate, Bake FBX.
+- Properties panel for offline selection.
+- Tab resizer + collapsible panel.
+- Help window (F1 or Help → User Guide).
+- JS errors routed to status bar + Serilog.
+
+**Implemented but NOT verified end-to-end:**
+- **APS path (`.nwd` / `.nwc`)** — code is in place (upload → translate → poll → viewer token → Autodesk Viewer render → `unloadModel` on tab switch), but has never been clicked through with real APS credentials. Blocker: no APS Client ID + Secret yet. First thing to validate once an APS app exists at https://aps.autodesk.com/myapps.
+- **IFC (`.ifc`)** — web-ifc WASM parser is bundled and wired (`IFCLoader`, per-type filter, element property lookup), but no `.ifc` file has been opened in the viewer yet.
+- **Large models** (50+ MB, 100k+ nodes) — tree virtualization is in place but only tested with small sub-MB FBX files.
+
+If you pick up this project and either IFC or APS doesn't work out of the box, treat it as "first-run debugging" rather than "regression" — nobody has ever confirmed them.
