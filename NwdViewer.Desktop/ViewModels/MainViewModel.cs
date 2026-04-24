@@ -148,9 +148,22 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var props = await _aps.ModelDerivative.GetObjectPropertiesAsync(tab.Urn, modelGuid, objectId, ct);
             tab.Properties.Clear();
-            var entry = props.Data.Collection.FirstOrDefault();
-            if (entry == null) return;
-            tab.Properties.Add(new PropertyNode { Key = "Name", Value = entry.Name });
+
+            var entry = props?.Data?.Collection?.FirstOrDefault();
+            if (entry == null)
+            {
+                // APS sometimes returns 200 with no collection while still indexing.
+                // Log the raw body so we can see the actual shape and diagnose.
+                var raw = _aps.ModelDerivative.LastPropertiesRawBody ?? "(no body)";
+                Log.Information("APS properties: no collection for dbId={Id}. Raw: {Body}",
+                    objectId, raw.Length > 400 ? raw[..400] + "..." : raw);
+                tab.Properties.Add(new PropertyNode { Key = "Info",
+                    Value = "Properties not available yet — APS may still be indexing. Try again in a moment." });
+                StatusText = $"Object #{objectId}: properties not yet available.";
+                return;
+            }
+
+            tab.Properties.Add(new PropertyNode { Key = "Name", Value = entry.Name ?? "(unnamed)" });
             if (!string.IsNullOrEmpty(entry.ExternalId))
                 tab.Properties.Add(new PropertyNode { Key = "External ID", Value = entry.ExternalId });
             if (entry.Properties != null)
@@ -158,11 +171,15 @@ public sealed partial class MainViewModel : ObservableObject
                 foreach (var category in entry.Properties)
                 {
                     var catNode = new PropertyNode { Key = category.Key };
-                    foreach (var prop in category.Value)
-                        catNode.Children.Add(new PropertyNode { Key = prop.Key, Value = prop.Value?.ToString() ?? string.Empty });
+                    if (category.Value != null)
+                    {
+                        foreach (var prop in category.Value)
+                            catNode.Children.Add(new PropertyNode { Key = prop.Key, Value = prop.Value?.ToString() ?? string.Empty });
+                    }
                     tab.Properties.Add(catNode);
                 }
             }
+            StatusText = $"Selected: {entry.Name ?? $"#{objectId}"}";
         }
         catch (Exception ex)
         {

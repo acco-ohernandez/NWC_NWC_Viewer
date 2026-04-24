@@ -73,8 +73,15 @@
     body.aps-active #toolbar-top,
     body.aps-active #section-controls,
     body.aps-active #lighting-controls,
-    body.aps-active #help { display: none; }
+    body.aps-active #help,
+    body.aps-active #tree-panel,
+    body.aps-active #resizer { display: none; }
     body.aps-active #aps-canvas { display: block; }
+    /* Escape the CSS grid entirely on APS tabs — the APS viewer measures its
+       container at init and can get stuck with zero-size if the grid tracks
+       were collapsed at that moment. Full-window absolute layout avoids that. */
+    body.aps-active #app { position: relative; }
+    body.aps-active #viewport { position: absolute; inset: 0; }
 
     /* ---------- Dark theme ---------- */
     body.dark                        { background: #1f1f1f; color: #ddd; }
@@ -389,6 +396,7 @@
         } else {
           // APS
           this.urn = null; this.token = null;
+          this.apsCameraState = null;   // snapshot from apsViewer.getState for resume-on-switch
         }
       }
       dispose() {
@@ -476,15 +484,38 @@
           }
         } catch (_) {}
 
-        Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
-          const m = doc.getRoot().getDefaultGeometry();
-          apsViewer.loadDocumentNode(doc, m)
-            .then(() => postHost({ type: 'loaded', tabId }))
-            .catch((err) => { postErr('aps-load-model', err, tabId); setStatus('APS load failed.'); });
-        }, (code, msg) => {
-          postErr('aps-doc-load', new Error(`[${code}] ${msg}`), tabId);
-          setStatus('APS error: ' + msg);
-        });
+        // Give the browser TWO frames to pick up the container's new size after CSS changes
+        // (single RAF sometimes fires before the browser has reflowed after class changes).
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const w = apsCt.clientWidth, h = apsCt.clientHeight;
+          postHost({ type: 'apsDiag', msg: `pre-load apsCt=${w}x${h}` });
+          try { apsViewer.resize(); } catch (_) {}
+
+          Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
+            const m = doc.getRoot().getDefaultGeometry();
+            apsViewer.loadDocumentNode(doc, m)
+              .then(() => {
+                const w2 = apsCt.clientWidth, h2 = apsCt.clientHeight;
+                postHost({ type: 'apsDiag', msg: `post-load apsCt=${w2}x${h2}` });
+                try {
+                  apsViewer.resize();
+                  apsViewer.impl?.invalidate?.(true, true, true);
+                  // If this tab has a saved camera (from a previous switch-away), restore
+                  // it so the user returns to the exact view they had, not APS's home view.
+                  const st = tabs.get(tabId);
+                  if (st && st.apsCameraState) {
+                    try { apsViewer.restoreState(st.apsCameraState, { viewport: true }, true /*immediate*/); }
+                    catch (e) { postHost({ type: 'apsDiag', msg: 'restoreState err: ' + e.message }); }
+                  }
+                } catch (e) { postHost({ type: 'apsDiag', msg: 'resize err: ' + e.message }); }
+                postHost({ type: 'loaded', tabId });
+              })
+              .catch((err) => { postErr('aps-load-model', err, tabId); setStatus('APS load failed.'); });
+          }, (code, msg) => {
+            postErr('aps-doc-load', new Error(`[${code}] ${msg}`), tabId);
+            setStatus('APS error: ' + msg);
+          });
+        }));
       };
       if (!apsInitialized) initApsViewer(token, go); else go();
     }
@@ -508,15 +539,35 @@
       return box;
     }
 
-    // Frames the camera on a bounding box, with a margin factor.
-    function frameCameraToBox(st, box, margin = 1.2) {
+    // Frames the camera on a bounding box, preserving the current view direction.
+    // Distance is computed from the camera's FOV + aspect so the box exactly fills
+    // the viewport with a small margin (no ISO-snap on Fit).
+    function frameCameraToBox(st, box, margin = 1.08) {
       if (!box || box.isEmpty()) return;
-      const size = box.getSize(new THREE.Vector3()).length() || 1;
-      const center = box.getCenter(new THREE.Vector3());
-      st.camera.position.copy(center).add(new THREE.Vector3(size * margin, size * margin * 0.5, size * margin));
-      st.camera.near = Math.max(size / 1000, 0.0001);
-      st.camera.far = Math.max(size * 100, 10);
+      const size = new THREE.Vector3();   box.getSize(size);
+      const center = new THREE.Vector3(); box.getCenter(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const fov = st.camera.fov * Math.PI / 180;
+      const aspect = st.camera.aspect || 1;
+      // Distance required to fit the largest dimension vertically AND horizontally.
+      const distV = (maxDim / 2) / Math.tan(fov / 2);
+      const distH = distV / Math.max(aspect, 0.0001);
+      const dist  = Math.max(distV, distH) * margin;
+
+      // Keep the current view direction (camera -> target vector, normalized).
+      const dir = new THREE.Vector3();
+      if (st === getActive()) dir.subVectors(st.camera.position, controls.target);
+      else                    dir.subVectors(st.camera.position, center);
+      if (dir.lengthSq() < 1e-10) dir.set(1, 1, 1);   // fallback to ISO for a degenerate view
+      dir.normalize();
+
+      st.camera.position.copy(center).addScaledVector(dir, dist);
+      const range = box.getSize(new THREE.Vector3()).length() || 1;
+      st.camera.near = Math.max(range / 10000, 0.0001);
+      st.camera.far  = Math.max(range * 1000, 100);
       st.camera.updateProjectionMatrix();
+
       if (st === getActive()) { controls.target.copy(center); controls.update(); }
     }
 
@@ -645,11 +696,17 @@
       const prev = getActive();
       if (prev && prev.mode === 'offline') {
         prev.cameraState = { pos: prev.camera.position.clone(), target: controls.target.clone() };
+      } else if (prev && prev.mode === 'aps' && apsViewer) {
+        // Snapshot the APS viewer's camera + viewport state so we can restore it
+        // when the user comes back to this tab (see loadApsTab post-load handler).
+        try { prev.apsCameraState = apsViewer.getState({ viewport: true }); } catch (_) {}
       }
       activeTabId = tabId;
       const st = getActive();
       if (st.mode === 'offline') {
         document.body.classList.remove('aps-active');
+        // Restore the expanded / collapsed layout chosen for offline mode
+        app.style.gridTemplateColumns = app.classList.contains('collapsed') ? '28px 1fr' : expandedCols;
         controls.object = st.camera;
         controls.enabled = true;
         if (st.cameraState) {

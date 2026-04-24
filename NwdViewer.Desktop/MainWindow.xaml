@@ -6,7 +6,10 @@
         Title="3D Model Viewer — NWD · NWC · FBX · IFC · glTF · OBJ · STL"
         Height="720" Width="1200"
         WindowStartupLocation="CenterScreen"
-        KeyDown="OnWindowKeyDown">
+        KeyDown="OnWindowKeyDown"
+        AllowDrop="True"
+        PreviewDragOver="OnPreviewDragOver"
+        Drop="OnDrop">
     <Window.Resources>
         <Style x:Key="TabHeaderStyle" TargetType="Border">
             <Setter Property="Background" Value="#E8E8E8"/>
@@ -61,8 +64,8 @@
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="360" MinWidth="220"/>
+                <ColumnDefinition x:Name="PropertiesSplitterColumn" Width="5"/>
+                <ColumnDefinition x:Name="PropertiesColumn" Width="360" MinWidth="0"/>
             </Grid.ColumnDefinitions>
 
             <DockPanel Grid.Column="0">
@@ -89,9 +92,9 @@
                 <wv2:WebView2 x:Name="Viewer"/>
             </DockPanel>
 
-            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#DDD"/>
+            <GridSplitter x:Name="PropertiesSplitter" Grid.Column="1" HorizontalAlignment="Stretch" Background="#DDD"/>
 
-            <DockPanel Grid.Column="2">
+            <DockPanel x:Name="PropertiesPanel" Grid.Column="2">
                 <TextBlock DockPanel.Dock="Top" Text="Properties" FontWeight="Bold" Margin="8"/>
                 <TreeView ItemsSource="{Binding ActiveTab.Properties}">
                     <TreeView.Resources>

@@ -49,17 +49,28 @@ public partial class MainWindow : Window
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.ActiveTab) && _vm.ActiveTab != null)
+        if (e.PropertyName == nameof(MainViewModel.ActiveTab))
         {
-            PostOrQueue(new { type = "switchTab", tabId = _vm.ActiveTab.TabId });
-            if (_vm.ActiveTab.Mode == TabMode.Aps && _vm.ActiveTab.Urn != null && _vm.ActiveTab.Token != null)
-                PostOrQueue(new
-                {
-                    type  = "loadAps",
-                    tabId = _vm.ActiveTab.TabId,
-                    urn   = NwdViewer.Aps.OssClient.WithoutPrefix(_vm.ActiveTab.Urn),
-                    token = _vm.ActiveTab.Token
-                });
+            // Hide the Properties panel + splitter when active tab is APS — the Autodesk
+            // viewer has its own Model Browser and Properties panels in its bottom toolbar.
+            var isAps = _vm.ActiveTab?.Mode == TabMode.Aps;
+            PropertiesPanel.Visibility        = isAps ? Visibility.Collapsed : Visibility.Visible;
+            PropertiesSplitter.Visibility     = isAps ? Visibility.Collapsed : Visibility.Visible;
+            PropertiesColumn.Width            = isAps ? new GridLength(0) : new GridLength(360);
+            PropertiesSplitterColumn.Width    = isAps ? new GridLength(0) : new GridLength(5);
+
+            if (_vm.ActiveTab != null)
+            {
+                PostOrQueue(new { type = "switchTab", tabId = _vm.ActiveTab.TabId });
+                if (_vm.ActiveTab.Mode == TabMode.Aps && _vm.ActiveTab.Urn != null && _vm.ActiveTab.Token != null)
+                    PostOrQueue(new
+                    {
+                        type  = "loadAps",
+                        tabId = _vm.ActiveTab.TabId,
+                        urn   = NwdViewer.Aps.OssClient.WithoutPrefix(_vm.ActiveTab.Urn),
+                        token = _vm.ActiveTab.Token
+                    });
+            }
         }
     }
 
@@ -80,6 +91,9 @@ public partial class MainWindow : Window
                 env = await CoreWebView2Environment.CreateAsync();
             }
             await Viewer.EnsureCoreWebView2Async(env);
+            // Let files dropped on the window reach WPF's Drop handler instead of being
+            // swallowed by WebView2's default file-drop behavior.
+            try { Viewer.AllowExternalDrop = false; } catch { /* property not available on older WebView2; ignore */ }
             Viewer.CoreWebView2.WebMessageReceived += OnViewerMessage;
             Viewer.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "nwdviewer.app", AppContext.BaseDirectory, CoreWebView2HostResourceAccessKind.Allow);
@@ -194,6 +208,10 @@ public partial class MainWindow : Window
                     _vm.StatusText = "Viewer error: " + (doc.RootElement.GetPropertyOrNull("message")?.GetString() ?? "unknown");
                     break;
 
+                case "apsDiag":
+                    Log.Information("APS diag: {Msg}", doc.RootElement.GetPropertyOrNull("msg")?.GetString());
+                    break;
+
                 case "imageData":
                 {
                     var purpose = doc.RootElement.GetPropertyOrNull("purpose")?.GetString() ?? "image";
@@ -251,6 +269,15 @@ public partial class MainWindow : Window
     private TabViewModel? FindTab(int? id)
         => id.HasValue ? _vm.Tabs.FirstOrDefault(t => t.TabId == id.Value) : null;
 
+    private static readonly HashSet<string> OfflineExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".ifc", ".gltf", ".glb", ".obj", ".fbx", ".stl"
+    };
+    private static readonly HashSet<string> ApsExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".nwd", ".nwc"
+    };
+
     private async void OnOpenApsFile(object sender, RoutedEventArgs e)
     {
         if (!_webViewReady) return;
@@ -264,44 +291,86 @@ public partial class MainWindow : Window
         var dlg = new OpenFileDialog
         {
             Filter = "Navisworks files (*.nwd;*.nwc)|*.nwd;*.nwc|All files (*.*)|*.*",
-            Title = "Open Navisworks file",
+            Title = "Open Navisworks file(s)",
+            Multiselect = true,
         };
         if (dlg.ShowDialog(this) != true) return;
-
-        try
-        {
-            var (urn, token, modelGuid) = await _vm.TranslateAsync(dlg.FileName);
-            Log.Information("APS translate complete: urn={Urn} modelGuid={Guid}", urn, modelGuid ?? "(null)");
-            var tab = _vm.AddApsTab(dlg.FileName, urn, token);
-            tab.ApsModelGuid = modelGuid;
-            PostOrQueue(new { type = "createTab", tabId = tab.TabId, mode = "aps" });
-            // JS Autodesk.Viewing.Document.load wants "urn:<base64>" — our C# URN already has the prefix,
-            // but the viewer.html code prepends another "urn:" itself. Strip our prefix so JS produces
-            // the correct single-prefix form.
-            PostOrQueue(new { type = "loadAps", tabId = tab.TabId, urn = NwdViewer.Aps.OssClient.WithoutPrefix(urn), token });
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "APS open failed.");
-            MessageBox.Show(this, ex.Message, "Open failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        await OpenPathsAsync(dlg.FileNames);
     }
 
-    private void OnOpenOfflineFile(object sender, RoutedEventArgs e)
+    private async void OnOpenOfflineFile(object sender, RoutedEventArgs e)
     {
         if (!_webViewReady) return;
         var dlg = new OpenFileDialog
         {
             Filter = "3D model files (*.ifc;*.gltf;*.glb;*.obj;*.fbx;*.stl)|*.ifc;*.gltf;*.glb;*.obj;*.fbx;*.stl|All files (*.*)|*.*",
-            Title = "Open 3D model file",
+            Title = "Open 3D model file(s)",
+            Multiselect = true,
         };
         if (dlg.ShowDialog(this) != true) return;
+        await OpenPathsAsync(dlg.FileNames);
+    }
 
+    /// <summary>
+    /// Opens a mixed batch of files. Offline formats open in parallel (cheap local loads).
+    /// APS formats open sequentially to avoid hammering the Model Derivative API with
+    /// parallel translation jobs.
+    /// </summary>
+    private async Task OpenPathsAsync(IEnumerable<string> paths)
+    {
+        if (!_webViewReady) return;
+
+        var offline = new List<string>();
+        var aps     = new List<string>();
+        var unknown = new List<string>();
+        foreach (var p in paths)
+        {
+            var ext = Path.GetExtension(p);
+            if      (OfflineExtensions.Contains(ext)) offline.Add(p);
+            else if (ApsExtensions.Contains(ext))     aps.Add(p);
+            else                                       unknown.Add(p);
+        }
+
+        // Offline: open all in one pass; three.js handles parallel loads
+        foreach (var path in offline) OpenOfflinePath(path);
+
+        // APS: check credentials once, then queue sequentially
+        if (aps.Count > 0 && _vm.GetCredentials() == null)
+        {
+            MessageBox.Show(this,
+                $"Configure APS credentials first (Settings > APS Credentials).\n\n{aps.Count} Navisworks file(s) skipped.",
+                "Missing credentials", MessageBoxButton.OK, MessageBoxImage.Information);
+            aps.Clear();
+        }
+        for (int i = 0; i < aps.Count; i++)
+        {
+            var path = aps[i];
+            _vm.StatusText = $"Opening APS file {i + 1} of {aps.Count}: {Path.GetFileName(path)}";
+            try { await OpenApsPathAsync(path); }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "APS open failed for {Path}", path);
+                var cont = MessageBox.Show(this,
+                    $"Failed to open '{Path.GetFileName(path)}':\n\n{ex.Message}\n\nContinue with the remaining files?",
+                    "APS open failed",
+                    aps.Count - i > 1 ? MessageBoxButton.YesNo : MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                if (cont == MessageBoxResult.No) break;
+            }
+        }
+
+        if (unknown.Count > 0)
+        {
+            _vm.StatusText = $"Skipped {unknown.Count} unsupported file(s).";
+        }
+    }
+
+    private void OpenOfflinePath(string path)
+    {
         try
         {
-            var path = dlg.FileName;
-            var format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
-            var folder = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("File has no directory.");
+            var format   = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+            var folder   = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("File has no directory.");
             var fileName = Path.GetFileName(path);
 
             var tab = _vm.AddOfflineTab(path);
@@ -321,6 +390,16 @@ public partial class MainWindow : Window
             Log.Error(ex, "Offline open failed.");
             MessageBox.Show(this, ex.Message, "Open failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private async Task OpenApsPathAsync(string path)
+    {
+        var (urn, token, modelGuid) = await _vm.TranslateAsync(path);
+        Log.Information("APS translate complete: urn={Urn} modelGuid={Guid}", urn, modelGuid ?? "(null)");
+        var tab = _vm.AddApsTab(path, urn, token);
+        tab.ApsModelGuid = modelGuid;
+        PostOrQueue(new { type = "createTab", tabId = tab.TabId, mode = "aps" });
+        PostOrQueue(new { type = "loadAps", tabId = tab.TabId, urn = NwdViewer.Aps.OssClient.WithoutPrefix(urn), token });
     }
 
     private void OnTabClick(object sender, MouseButtonEventArgs e)
@@ -505,6 +584,20 @@ public partial class MainWindow : Window
             Log.Warning(ex, "Could not open log folder.");
             MessageBox.Show(this, dir, "Log folder path", MessageBoxButton.OK);
         }
+    }
+
+    private void OnPreviewDragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnDrop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+        if (files == null || files.Length == 0) return;
+        await OpenPathsAsync(files);
     }
 
     private void OnWindowKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

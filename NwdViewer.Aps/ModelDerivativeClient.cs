@@ -103,7 +103,7 @@ public sealed class ModelDerivativeClient
         return wrapper?.Data?.Metadata ?? new List<MetadataEntry>();
     }
 
-    public async Task<ObjectProperties> GetObjectPropertiesAsync(
+    public async Task<ObjectProperties?> GetObjectPropertiesAsync(
         string urn,
         string modelGuid,
         int objectId,
@@ -115,8 +115,25 @@ public sealed class ModelDerivativeClient
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<ObjectProperties>(cancellationToken: ct)
-            ?? throw new InvalidOperationException("APS returned an empty properties payload.");
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"APS properties GET failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {body}");
+
+        // Stash the raw body so the caller can log it if deserialization produces
+        // a null Data/Collection — APS sometimes returns 200 with a body that's
+        // still indexing and doesn't have the { data: { collection: [...] } } shape.
+        LastPropertiesRawBody = body;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<ObjectProperties>(body);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
+
+    /// <summary>Raw body of the most recent GetObjectPropertiesAsync call; for diagnostics when
+    /// the typed response is unexpectedly empty.</summary>
+    public string? LastPropertiesRawBody { get; private set; }
 }
